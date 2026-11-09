@@ -184,10 +184,10 @@ public class TorrentEngine {
             sp.uploadRateLimit(0); // Unlimited upload so peers freely unchoke download bandwidth
             sp.activeDownloads(2);
             sp.activeLimit(4);
-            sp.connectionsLimit(55); // Connect to up to 55 peers simultaneously (tuned for TV RAM & Wi-Fi)
-            sp.maxPeerlistSize(500); // Retain 500 candidate peers in the swarm pool (down from 3000)
-            sp.alertQueueSize(500);  // Cap alert queue to protect Dalvik heap from thousands of Java objects
-            sp.inactivityTimeout(20);
+            sp.connectionsLimit(120); // Connect to up to 120 peers simultaneously for rapid seed acquisition
+            sp.maxPeerlistSize(2000); // Retain 2000 candidate peers in the swarm pool
+            sp.alertQueueSize(800);  // Safe cap for alert queue to protect Dalvik heap
+            sp.inactivityTimeout(120); // 120s - give seeders time to unchoke without premature disconnects
             sp.anonymousMode(false); // MUST be false so DHT and peer handshakes connect freely
             sp.setEnableDht(true);
             sp.setDhtBootstrapNodes("router.bittorrent.com:6881,dht.transmissionbt.com:6881,router.utorrent.com:6881,dht.aelitis.com:6881,dht.libtorrent.org:25401");
@@ -200,30 +200,30 @@ public class TorrentEngine {
             sp.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), true);
             sp.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), true);
 
-            // Immediate Burst Connection: Load all peers at once without trickling
+            // Immediate Burst Connection: Load peers at maximum connection rate
             sp.setBoolean(settings_pack.bool_types.smooth_connects.swigValue(), false);
-            sp.setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), 60);
-            sp.setInteger(settings_pack.int_types.connection_speed.swigValue(), 60);
-            sp.setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 15); // Standard 15s to allow handshakes to complete
-            sp.setInteger(settings_pack.int_types.handshake_timeout.swigValue(), 15); // Standard 15s
+            sp.setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), 150);
+            sp.setInteger(settings_pack.int_types.connection_speed.swigValue(), 150);
+            sp.setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 25);
+            sp.setInteger(settings_pack.int_types.handshake_timeout.swigValue(), 25);
             sp.setInteger(settings_pack.int_types.allowed_fast_set_size.swigValue(), 10);
             sp.setBoolean(settings_pack.bool_types.strict_end_game_mode.swigValue(), false);
-            sp.setInteger(settings_pack.int_types.tracker_completion_timeout.swigValue(), 15);
-            sp.setInteger(settings_pack.int_types.tracker_receive_timeout.swigValue(), 10);
-            sp.setInteger(settings_pack.int_types.dht_search_branching.swigValue(), 8);
-            sp.setInteger(settings_pack.int_types.dht_max_peers_reply.swigValue(), 80);
+            sp.setInteger(settings_pack.int_types.tracker_completion_timeout.swigValue(), 20);
+            sp.setInteger(settings_pack.int_types.tracker_receive_timeout.swigValue(), 15);
+            sp.setInteger(settings_pack.int_types.dht_search_branching.swigValue(), 10);
+            sp.setInteger(settings_pack.int_types.dht_max_peers_reply.swigValue(), 100);
             sp.setInteger(settings_pack.int_types.initial_picker_threshold.swigValue(), 4);
 
             // Aggressive DHT scheduling
             sp.setBoolean(settings_pack.bool_types.dht_aggressive_lookups.swigValue(), true);
             sp.setBoolean(settings_pack.bool_types.auto_sequential.swigValue(), false);
 
-            // Deep pipelining tuned for TV: request queue 250 blocks for maximum throughput without memory exhaustion
-            sp.setInteger(settings_pack.int_types.max_out_request_queue.swigValue(), 250);
+            // Deep pipelining tuned for streaming: request queue 300 blocks
+            sp.setInteger(settings_pack.int_types.max_out_request_queue.swigValue(), 300);
             sp.setInteger(settings_pack.int_types.request_queue_time.swigValue(), 2);
 
-            // Rapid piece timeout: if a peer stalls on a block, steal from faster peer after 10s
-            sp.setInteger(settings_pack.int_types.piece_timeout.swigValue(), 10);
+            // Rapid piece timeout: if a peer stalls on a block, steal from faster peer after 12s
+            sp.setInteger(settings_pack.int_types.piece_timeout.swigValue(), 12);
 
             // Rate-based choker: unlocks highest download throughput from peers
             sp.setInteger(settings_pack.int_types.choking_algorithm.swigValue(), settings_pack.choking_algorithm_t.rate_based_choker.swigValue());
@@ -233,22 +233,20 @@ public class TorrentEngine {
             sp.setInteger(settings_pack.int_types.recv_socket_buffer_size.swigValue(), 256 * 1024);
             sp.setInteger(settings_pack.int_types.send_socket_buffer_size.swigValue(), 128 * 1024);
 
-            // Centrifuge Peer Churn & High-Bandwidth Retention Filter (Non-destructive to startup)
-            sp.setBoolean(settings_pack.bool_types.auto_manage_prefer_seeds.swigValue(), true); // Prioritize 100% complete seeders
-            sp.setBoolean(settings_pack.bool_types.close_redundant_connections.swigValue(), true); // Drop redundant connections
-            sp.setInteger(settings_pack.int_types.peer_turnover.swigValue(), 10); // Disconnect bottom 10% slowest peers
-            sp.setInteger(settings_pack.int_types.peer_turnover_cutoff.swigValue(), 90); // Filter bottom 90% percentile of peers
-            sp.setInteger(settings_pack.int_types.peer_turnover_interval.swigValue(), 15); // Run filter every 15 seconds
-            sp.setInteger(settings_pack.int_types.inactive_down_rate.swigValue(), 2048); // Drop truly dead peers sending < 2 KB/s
-            sp.setInteger(settings_pack.int_types.inactivity_timeout.swigValue(), 20); // Drop idle peers after 20s
-            sp.setInteger(settings_pack.int_types.unchoke_interval.swigValue(), 1); // Recalculate unchoke slots every 1s
-            sp.setInteger(settings_pack.int_types.optimistic_unchoke_interval.swigValue(), 3); // Test candidate peers every 3s
+            // Stable Peer Retention (NO aggressive churn so connected seeders are preserved)
+            sp.setBoolean(settings_pack.bool_types.auto_manage_prefer_seeds.swigValue(), true);
+            sp.setBoolean(settings_pack.bool_types.close_redundant_connections.swigValue(), true);
+            sp.setInteger(settings_pack.int_types.peer_turnover.swigValue(), 4); // Gentle 4% turnover
+            sp.setInteger(settings_pack.int_types.peer_turnover_cutoff.swigValue(), 90);
+            sp.setInteger(settings_pack.int_types.peer_turnover_interval.swigValue(), 300); // Run turnover every 5 mins, NOT every 15s
+            sp.setInteger(settings_pack.int_types.unchoke_interval.swigValue(), 1);
+            sp.setInteger(settings_pack.int_types.optimistic_unchoke_interval.swigValue(), 3);
 
-            // Mixed mode: Prefer TCP / don't let uTP choke throughput
-            sp.setInteger(settings_pack.int_types.mixed_mode_algorithm.swigValue(), settings_pack.bandwidth_mixed_algo_t.prefer_tcp.swigValue());
+            // Peer-proportional mixed mode: balances TCP and uTP fairly without throttling UDP seeders
+            sp.setInteger(settings_pack.int_types.mixed_mode_algorithm.swigValue(), settings_pack.bandwidth_mixed_algo_t.peer_proportional.swigValue());
 
-            // 4 MB max disk write queue cap to protect low-RAM Android TVs
-            sp.setInteger(settings_pack.int_types.max_queued_disk_bytes.swigValue(), 4 * 1024 * 1024);
+            // 6 MB max disk write queue cap to protect low-RAM Android TVs
+            sp.setInteger(settings_pack.int_types.max_queued_disk_bytes.swigValue(), 6 * 1024 * 1024);
 
             mSession.addListener(new AlertListener() {
                 @Override
@@ -277,7 +275,7 @@ public class TorrentEngine {
             mSession.start(new SessionParams(sp));
             mSession.startDht();
 
-            // Continuous Swarm Harvester: Every 30 seconds query DHT; reannounce to trackers safely without IGNORE_MIN_INTERVAL
+            // Rapid Swarm Harvester: Every 15 seconds query DHT and reannounce to trackers if peer count < 25
             final long[] lastTrackerAnnounce = new long[]{System.currentTimeMillis()};
             mHarvesterExecutor.scheduleWithFixedDelay(() -> {
                 synchronized (mLock) {
@@ -288,7 +286,7 @@ public class TorrentEngine {
                                 h.forceDHTAnnounce();
                                 long now = System.currentTimeMillis();
                                 TorrentStatus st = h.status();
-                                if (now - lastTrackerAnnounce[0] > 180000 || (st != null && st.numPeers() < 6)) {
+                                if (now - lastTrackerAnnounce[0] > 120000 || (st != null && st.numPeers() < 25)) {
                                     lastTrackerAnnounce[0] = now;
                                     h.forceReannounce();
                                 }
@@ -296,7 +294,7 @@ public class TorrentEngine {
                         }
                     }
                 }
-            }, 30, 30, TimeUnit.SECONDS);
+            }, 5, 15, TimeUnit.SECONDS);
 
             Log.i(TAG, "libtorrent4j session started with 1GB Fire TV Stick memory-safe profile, Centrifuge filter & DHT nodes");
         } catch (Throwable t) {
@@ -723,19 +721,22 @@ public class TorrentEngine {
             h.resume();
         } catch (Throwable ignored) {}
 
-        // Boost the first 4 pieces with TOP priority and urgent deadline for immediate playback start
+        // Boost piece 0 with TOP priority and immediate deadline 0 for instant playback start
         for (int p = mStartPiece; p <= Math.min(mEndPiece, mStartPiece + 3); p++) {
             try {
                 h.piecePriority(p, Priority.TOP_PRIORITY);
-                h.setPieceDeadline(p, (p - mStartPiece) * 40); // Piece 0 receives deadline 0 (IMMEDIATE)
+                if (p == mStartPiece) {
+                    h.setPieceDeadline(p, 0); // Immediate: Piece 0 gets 100% of initial swarm download capacity
+                } else {
+                    h.setPieceDeadline(p, (p - mStartPiece) * 150);
+                }
             } catch (Throwable ignored) {}
         }
 
-        // Boost the last 2 pieces (crucial for MKV cues and MP4 moov atom index)
+        // Prioritize trailer pieces with high priority for container indices without starving piece 0
         for (int p = Math.max(mStartPiece, mEndPiece - 2); p <= mEndPiece; p++) {
             try {
-                h.piecePriority(p, Priority.TOP_PRIORITY);
-                h.setPieceDeadline(p, 50);
+                h.piecePriority(p, Priority.SIX);
             } catch (Throwable ignored) {}
         }
 
@@ -768,8 +769,10 @@ public class TorrentEngine {
 
             // Urgent deadline for target piece (0 = immediate)
             try {
-                h.piecePriority(targetPiece, Priority.TOP_PRIORITY);
-                h.setPieceDeadline(targetPiece, 0);
+                if (!h.havePiece(targetPiece)) {
+                    h.piecePriority(targetPiece, Priority.TOP_PRIORITY);
+                    h.setPieceDeadline(targetPiece, 0);
+                }
             } catch (Throwable ignored) {}
 
             // Critical rule: pieces in the container header (start) and container trailer (end)
@@ -791,38 +794,42 @@ public class TorrentEngine {
                 }
             }
 
-            // Always ensure the first 4 pieces (file header / container format) retain TOP_PRIORITY
+            // Ensure container header pieces retain TOP_PRIORITY with graduated deadlines (NEVER competing for deadline 0)
             for (int p = mStartPiece; p <= protectedHeaderEnd; p++) {
                 try {
                     if (!h.havePiece(p)) {
                         h.piecePriority(p, Priority.TOP_PRIORITY);
-                        h.setPieceDeadline(p, 0);
+                        if (p != targetPiece) {
+                            h.setPieceDeadline(p, (p - mStartPiece + 1) * 200);
+                        }
                     }
                 } catch (Throwable ignored) {}
             }
 
-            // Always ensure the last 3 pieces (MKV cues / MP4 moov index) stay TOP_PRIORITY
+            // Ensure trailer pieces retain high priority (Priority.SIX) without competing for deadline 0
             for (int p = protectedTrailerStart; p <= mEndPiece; p++) {
                 try {
                     if (!h.havePiece(p)) {
-                        h.piecePriority(p, Priority.TOP_PRIORITY);
-                        h.setPieceDeadline(p, 0);
+                        h.piecePriority(p, Priority.SIX);
+                        if (targetPiece >= protectedTrailerStart) {
+                            h.setPieceDeadline(p, (p - protectedTrailerStart) * 50);
+                        }
                     }
                 } catch (Throwable ignored) {}
             }
 
-            // Tier 1: Immediate next 3 pieces from targetPiece (Urgent) - Top Priority with immediate deadlines
-            for (int p = targetPiece; p <= Math.min(mEndPiece, targetPiece + 2); p++) {
+            // Tier 1: Immediate next 2 pieces from targetPiece - High Priority with graduated deadlines
+            for (int p = targetPiece + 1; p <= Math.min(mEndPiece, targetPiece + 2); p++) {
                 try {
                     if (!h.havePiece(p)) {
                         h.piecePriority(p, Priority.TOP_PRIORITY);
-                        h.setPieceDeadline(p, (p - targetPiece) * 30);
+                        h.setPieceDeadline(p, (p - targetPiece) * 150);
                     }
                 } catch (Throwable ignored) {}
             }
 
-            // Tier 2: Next 10 pieces in near-future pipeline - Priority.SIX
-            for (int p = targetPiece + 3; p <= Math.min(mEndPiece, targetPiece + 12); p++) {
+            // Tier 2: Next 8 pieces in near-future pipeline - Priority.SIX
+            for (int p = targetPiece + 3; p <= Math.min(mEndPiece, targetPiece + 10); p++) {
                 try {
                     if (!h.havePiece(p)) {
                         h.piecePriority(p, Priority.SIX);
@@ -830,8 +837,8 @@ public class TorrentEngine {
                 } catch (Throwable ignored) {}
             }
 
-            // Tier 3: Next 16 pieces in buffer reservoir - Priority.FIVE
-            for (int p = targetPiece + 13; p <= Math.min(mEndPiece, targetPiece + 28); p++) {
+            // Tier 3: Next 10 pieces in buffer reservoir - Priority.FIVE
+            for (int p = targetPiece + 11; p <= Math.min(mEndPiece, targetPiece + 20); p++) {
                 try {
                     if (!h.havePiece(p)) {
                         h.piecePriority(p, Priority.FIVE);
@@ -875,15 +882,7 @@ public class TorrentEngine {
 
     public boolean waitForPiece(int pieceIndex, long timeoutMs) {
         if (pieceIndex < mStartPiece || pieceIndex > mEndPiece) return false;
-        synchronized (mLock) {
-            TorrentHandle h = getHandle();
-            if (h == null || mActiveTorrentInfo == null) return false;
-            try {
-                if (h.havePiece(pieceIndex)) return true;
-                h.piecePriority(pieceIndex, Priority.TOP_PRIORITY);
-                h.setPieceDeadline(pieceIndex, 0); // Immediate deadline for blocking playback reads
-            } catch (Throwable ignored) {}
-        }
+        if (isPieceDownloaded(pieceIndex)) return true;
 
         // Reactive event-driven wakeup via libtorrent PieceFinishedAlert
         synchronized (mPieceWaitLock) {
