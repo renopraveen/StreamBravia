@@ -1,0 +1,17 @@
+# Build output and intermediate artifacts
+/bin/
+/obj/
+/gen/
+/stream_cache/
+*.class
+*.dex
+*.apk
+*.ap_
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/
+*.log

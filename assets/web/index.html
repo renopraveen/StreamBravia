@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <title>StreamBravia — TV Streaming</title>
+  <link rel="stylesheet" href="style.css?v=2.6.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body class="tv-mode">
+
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="logo">
+      <span class="logo-icon">🎬</span>
+      <span class="logo-text">Stream<strong>Bravia</strong></span>
+    </div>
+
+    <nav class="nav-links">
+      <button class="nav-btn active focusable" data-type="movie" tabindex="0">Movies</button>
+      <button class="nav-btn focusable" data-type="series" tabindex="0">TV Series</button>
+      <button class="nav-btn focusable" id="btn-regional" data-genre="Regional" tabindex="0">Regional</button>
+      <button class="nav-btn focusable" id="btn-genres" tabindex="0">Genres ▾</button>
+    </nav>
+
+    <div class="nav-actions">
+      <div class="search-box">
+        <input type="text" id="search-input" class="focusable" placeholder="Search movies, actors..." tabindex="0">
+        <button id="voice-search-btn" class="icon-btn focusable" title="Voice Search (Hold remote mic or click)" tabindex="0">🎙️</button>
+        <button id="search-btn" class="focusable" tabindex="0">🔍</button>
+      </div>
+      <button id="settings-btn" class="icon-btn focusable" title="Settings / Debrid" tabindex="0">⚙️</button>
+    </div>
+  </header>
+
+  <!-- Genre Dropdown Menu -->
+  <div id="genre-menu" class="genre-menu hidden">
+    <button class="genre-item focusable" data-genre="">All Genres</button>
+    <button class="genre-item focusable" data-genre="Action">Action</button>
+    <button class="genre-item focusable" data-genre="Adventure">Adventure</button>
+    <button class="genre-item focusable" data-genre="Animation">Animation</button>
+    <button class="genre-item focusable" data-genre="Comedy">Comedy</button>
+    <button class="genre-item focusable" data-genre="Crime">Crime</button>
+    <button class="genre-item focusable" data-genre="Documentary">Documentary</button>
+    <button class="genre-item focusable" data-genre="Drama">Drama</button>
+    <button class="genre-item focusable" data-genre="Family">Family</button>
+    <button class="genre-item focusable" data-genre="Fantasy">Fantasy</button>
+    <button class="genre-item focusable" data-genre="Horror">Horror</button>
+    <button class="genre-item focusable" data-genre="Sci-Fi">Sci-Fi</button>
+    <button class="genre-item focusable" data-genre="Thriller">Thriller</button>
+  </div>
+
+  <!-- Hero Featured Banner -->
+  <section id="hero-banner" class="hero-banner">
+    <div class="hero-backdrop" id="hero-bg"></div>
+    <div class="hero-gradient"></div>
+    <div class="hero-content">
+      <span class="hero-tag">🔥 TRENDING RELEASES</span>
+      <h1 class="hero-title" id="hero-title">Select a Movie</h1>
+      <div class="hero-meta" id="hero-meta">
+        <span class="badge-rating" id="hero-rating">★ 8.8</span>
+        <span class="hero-year" id="hero-year">2026</span>
+        <span class="hero-genre" id="hero-genre">Action • Sci-Fi</span>
+        <span class="badge-4k">1080p Full HD</span>
+      </div>
+      <p class="hero-desc" id="hero-desc">Experience lightning-fast zero-latency streaming optimized with direct hardware decoding.</p>
+      <div class="hero-buttons">
+        <button id="hero-play-btn" class="btn btn-primary focusable" tabindex="0">▶ Watch Now</button>
+        <button id="hero-details-btn" class="btn btn-secondary focusable" tabindex="0">ℹ Details & Streams</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Content Grid -->
+  <main class="content-container">
+    <!-- Continue Watching Row (dynamically injected) -->
+    <div id="continue-watching-section" class="home-section" style="display:none;">
+      <div class="home-section-title">Continue Watching <span class="section-badge">RESUME</span></div>
+      <div id="continue-watching-row" class="horizontal-scroll-row"></div>
+    </div>
+
+    <!-- Recommendations Row (dynamically injected) -->
+    <div id="recommendations-section" class="home-section" style="display:none;">
+      <div class="home-section-title">Recommended For You <span class="section-badge">AI PICKS</span></div>
+      <div id="recommendations-row" class="horizontal-scroll-row"></div>
+    </div>
+
+    <div class="section-header">
+      <h2 id="section-title">Latest &amp; Top Rated</h2>
+      <span class="section-indicator" id="stream-count-indicator">Sorted by Year &amp; Rating ★</span>
+    </div>
+
+    <!-- Sub-Filter Bar (Similar to YTS Filter Bar) -->
+    <div id="sub-filter-bar" class="sub-filter-bar">
+      <!-- Regional Language Filter Group (Active on Regional Cinema) -->
+      <div id="regional-filter-row" class="sub-filter-group hidden">
+        <span class="sub-filter-label">Language:</span>
+        <button class="filter-pill active focusable" data-lang="all" tabindex="0">All</button>
+        <button class="filter-pill focusable" data-lang="tamil" tabindex="0">Tamil</button>
+        <button class="filter-pill focusable" data-lang="telugu" tabindex="0">Telugu</button>
+        <button class="filter-pill focusable" data-lang="malayalam" tabindex="0">Malayalam</button>
+        <button class="filter-pill focusable" data-lang="kannada" tabindex="0">Kannada</button>
+      </div>
+
+      <!-- Year Sub-Filter Group (Available across all catalogs) -->
+      <div id="year-filter-row" class="sub-filter-group">
+        <span class="sub-filter-label">Year:</span>
+        <div id="year-pills-container" class="year-pills-container">
+          <!-- Populated dynamically via JS: All, 2026, 2025, 2024, 2023, 2022, 2010s, 2000s, Classics -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Media Cards Grid -->
+    <div id="media-grid" class="media-grid">
+      <!-- Dynamically populated -->
+      <div class="loading-spinner">Loading catalogue...</div>
+    </div>
+  </main>
+
+  <!-- Movie Details Modal -->
+  <div id="details-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <button class="modal-close focusable" id="modal-close-btn" tabindex="0">✕</button>
+      
+      <div class="modal-header">
+        <img id="modal-poster" src="" alt="Poster" class="modal-poster">
+        <div class="modal-info">
+          <h2 id="modal-title">Movie Title</h2>
+          <div class="modal-badges">
+            <span class="badge-rating" id="modal-rating">★ 8.5</span>
+            <span class="badge-year" id="modal-year">2024</span>
+            <span class="badge-runtime" id="modal-runtime">148 min</span>
+            <span class="badge-genres" id="modal-genres">Action, Sci-Fi</span>
+          </div>
+          <p id="modal-synopsis" class="modal-synopsis">Loading synopsis and movie details...</p>
+          <div class="modal-cast" id="modal-cast"><strong>Cast:</strong> Loading...</div>
+          
+          <!-- Netflix-Style Prominent Play Bar -->
+          <div class="netflix-play-bar">
+            <button id="modal-play-now-btn" class="btn btn-netflix focusable" tabindex="0">
+              <span class="netflix-play-triangle">▶</span>
+              <span class="netflix-play-main">Play Now</span>
+            </button>
+            <button id="modal-play-start-btn" class="btn btn-restart-modal focusable" tabindex="0" title="Start video from beginning (00:00:00)">
+              <span class="restart-icon">↺</span>
+              <span>Start Over</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TV Series Season/Episode Selector -->
+      <div id="series-selector" class="series-selector hidden">
+        <div class="series-nav-header">
+          <span class="series-nav-title">📺 Select Season &amp; Episode</span>
+          <div class="series-seasons-pills" id="series-seasons-row"></div>
+        </div>
+        <div class="series-episodes-list" id="series-episodes-row"></div>
+      </div>
+
+      <!-- Collapsible Streams Section (Hidden by Default) -->
+      <div class="streams-collapsible-wrapper">
+        <button id="toggle-streams-btn" class="btn-accordion focusable" tabindex="0">
+          <span id="accordion-title">▼ Select Alternative Sources &amp; Qualities (Click to Expand)</span>
+          <span class="accordion-arrow" id="accordion-arrow">▾</span>
+        </button>
+
+        <div id="streams-collapsible-content" class="streams-content hidden">
+          <!-- Source Selection Tabs: Torrentio vs TamilBlasters -->
+          <div class="streams-source-tabs">
+            <button id="tab-source-torrentio" class="source-tab active focusable" tabindex="0">
+              <span class="source-tab-icon">🌐</span>
+              <span class="source-tab-name">Torrentio (Global)</span>
+              <span id="badge-count-torrentio" class="source-badge">...</span>
+            </button>
+            <button id="tab-source-tamilblasters" class="source-tab focusable" tabindex="0">
+              <span class="source-tab-icon">🇮🇳</span>
+              <span class="source-tab-name">TamilBlasters (MediaFusion)</span>
+              <span id="badge-count-tamilblasters" class="source-badge">...</span>
+            </button>
+          </div>
+
+          <!-- Section 1: Torrentio Global Streams -->
+          <div id="section-torrentio-streams" class="source-stream-section">
+            <div class="streams-header">
+              <div>
+                <span class="streams-hint">1080p Full HD prioritized • High-seed fast streaming</span>
+              </div>
+              <div class="quality-filters" id="quality-filters-torrentio">
+                <button class="filter-btn active focusable" data-filter="all">All Formats</button>
+                <button class="filter-btn focusable hidden" id="filter-btn-4k" data-filter="4k">4K Ultra HD</button>
+                <button class="filter-btn focusable" data-filter="1080p">1080p Full HD</button>
+                <button class="filter-btn focusable" data-filter="720p">720p Fast-Stream</button>
+              </div>
+            </div>
+            <div id="streams-list" class="streams-list">
+              <div class="loading-streams">Scanning 1337x, YTS, TorrentGalaxy, TPB, and Debrid cache...</div>
+            </div>
+          </div>
+
+          <!-- Section 2: TamilBlasters Regional Streams (Isolated Fault Domain) -->
+          <div id="section-tamilblasters-streams" class="source-stream-section hidden">
+            <div class="streams-header">
+              <div>
+                <span class="streams-hint">Tamil, Telugu, Hindi, Malayalam &amp; Multi-Audio Releases</span>
+              </div>
+              <div class="quality-filters" id="quality-filters-tb">
+                <button class="tb-filter-btn active focusable" data-filter="all">All Formats</button>
+                <button class="tb-filter-btn focusable hidden" id="tb-filter-btn-4k" data-filter="4k">4K UHD</button>
+                <button class="tb-filter-btn focusable" data-filter="1080p">1080p FHD</button>
+                <button class="tb-filter-btn focusable" data-filter="720p">720p HD</button>
+              </div>
+            </div>
+            <div id="tamilblasters-error-box" class="stream-error-card hidden"></div>
+            <div id="tamilblasters-streams-list" class="streams-list">
+              <div class="loading-streams">Connecting to MediaFusion / TamilBlasters...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Video Player Modal (Pure In-App TV Player) -->
+  <div id="player-modal" class="player-modal hidden">
+    
+    <div class="player-wrapper">
+      <video id="video-player" tabindex="-1" autoplay playsinline preload="auto" class="video-element"></video>
+      <div id="video-subtitles-overlay" class="video-subtitles-overlay hidden"></div>
+      
+      <!-- In-App TV Buffering Spinner -->
+      <div id="player-loading-spinner" class="player-loading-overlay">
+        <div class="tv-spinner"></div>
+        <div class="tv-loading-text" id="tv-loading-text">Connecting to Swarm...</div>
+        <div class="tv-loading-sub" id="tv-loading-sub">Pre-buffering 4K/1080p stream with lookahead for smooth zero-lag playback</div>
+      </div>
+
+      <!-- Accelerating D-Pad Seek Pill (Floating Center Badge) -->
+      <div id="seek-pill" class="seek-pill hidden">
+        <div class="seek-pill-inner">
+          <span id="seek-pill-icon" class="seek-pill-icon">⏩</span>
+          <div class="seek-pill-details">
+            <span id="seek-pill-delta" class="seek-pill-delta">+10s</span>
+            <span id="seek-pill-time" class="seek-pill-time">00:00:00 / --:--:--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Real-Time Stream Performance HUD -->
+    <div id="player-stream-hud" class="player-stream-hud">
+      <div class="hud-item"><span class="hud-icon">⚡</span> <span id="hud-speed">0 KB/s</span></div>
+      <div class="hud-item"><span class="hud-icon">👥</span> <span id="hud-peers">0 peers</span></div>
+      <div class="hud-item"><span class="hud-icon">⏳</span> <span id="hud-buffer">Pre-buffering...</span></div>
+      <div class="hud-item"><span class="hud-icon">📦</span> <span id="hud-file">Video Stream</span></div>
+    </div>
+
+    <!-- Custom TV Player Controls Overlay (Stable Duration Seek Bar) -->
+    <div class="tv-controls-overlay" id="tv-controls-overlay">
+      <div class="tv-controls-top">
+        <div class="tv-title-info">
+          <h3 id="player-title">Now Playing</h3>
+          <span id="player-subtitle" class="player-subtitle">Stream Details</span>
+        </div>
+      </div>
+
+      <div class="tv-controls-bottom">
+        <!-- Time indicators -->
+        <div class="seek-time-row">
+          <span id="seek-current-time" class="seek-time-text">00:00:00</span>
+          <span id="seek-total-time" class="seek-time-text">--:--:--</span>
+        </div>
+
+        <!-- Stable TV Seek Bar (Fixed Width Anchored to Movie Runtime) -->
+        <div id="tv-seek-bar-wrapper" class="tv-seek-bar-wrapper focusable" tabindex="0" title="Use Left/Right D-pad to seek">
+          <div class="tv-seek-track">
+            <div id="tv-seek-buffered" class="tv-seek-buffered"></div>
+            <div id="tv-seek-progress" class="tv-seek-progress"></div>
+            <div id="tv-seek-thumb" class="tv-seek-thumb"></div>
+          </div>
+        </div>
+
+        <!-- TV Remote Action Buttons: Centered Play/Pause & Seek Controls -->
+        <div class="tv-controls-actions">
+          <div class="tv-actions-left">
+            <button id="btn-hud-toggle" class="tv-btn tv-btn-icon focusable" tabindex="0" title="Diagnostics HUD (H)">
+              <svg class="tv-btn-svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H7v-4h5v4zm5 0h-4v-8h4v8zm0-10H7V5h10v2z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="tv-actions-center">
+            <button id="btn-restart" class="tv-btn tv-btn-icon focusable" tabindex="0" title="Play from Beginning (0)">
+              <svg class="tv-btn-svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+              </svg>
+            </button>
+            <button id="btn-rewind" class="tv-btn tv-btn-icon focusable" tabindex="0" title="Rewind 10s (Left Arrow)">
+              <svg class="tv-btn-svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/>
+              </svg>
+            </button>
+            <button id="btn-play-pause" class="tv-btn tv-btn-icon tv-btn-primary tv-btn-center-play focusable" tabindex="0" title="Play / Pause (Space / Enter)">
+              <svg id="svg-play" class="tv-btn-svg hidden" viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              <svg id="svg-pause" class="tv-btn-svg" viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+              </svg>
+            </button>
+            <button id="btn-forward" class="tv-btn tv-btn-icon focusable" tabindex="0" title="Forward 10s (Right Arrow)">
+              <svg class="tv-btn-svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/>
+              </svg>
+            </button>
+            <button id="btn-prev-ep" class="tv-btn tv-btn-icon focusable hidden" tabindex="0" title="Previous Episode (P)">
+              <svg class="tv-btn-svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
+              </svg>
+            </button>
+            <button id="btn-next-ep" class="tv-btn tv-btn-icon focusable hidden" tabindex="0" title="Next Episode (N)">
+              <svg class="tv-btn-svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="tv-actions-right">
+            <button id="player-sub-btn" class="tv-btn tv-btn-icon focusable" tabindex="0" title="Subtitles (S)">
+              <svg class="tv-btn-svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-9 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z"/>
+              </svg>
+            </button>
+            <button id="player-audio-btn" class="tv-btn tv-btn-icon focusable" tabindex="0" title="Audio Tracks & Dolby Atmos (A)">
+              <svg class="tv-btn-svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- YouTube-Style In-Player Subtitle Drawer -->
+    <div id="subtitle-modal" class="tv-drawer-panel hidden">
+      <div class="tv-drawer-header">
+        <div class="tv-drawer-title-group">
+          <span class="tv-drawer-icon">💬</span>
+          <span class="tv-drawer-title">Subtitles &amp; Captions (CC)</span>
+        </div>
+        <button class="tv-drawer-close focusable" id="sub-close-btn" tabindex="0" title="Close Subtitles (Esc)">✕</button>
+      </div>
+
+      <div class="tv-drawer-content">
+        <!-- Active / Detected Subtitle Track Selection -->
+        <div class="tv-drawer-section">
+          <div class="tv-drawer-label">Available Subtitle Tracks</div>
+          <div id="sub-active-list" class="sub-active-list">
+            <div class="sub-track-item active focusable" data-track-url="" tabindex="0">
+              <span class="sub-track-radio">●</span>
+              <span class="sub-track-title">Off (Subtitles Disabled)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Online Subtitle Search & Download -->
+        <div class="tv-drawer-section">
+          <div class="tv-drawer-label">📥 Search &amp; Download Subtitles (VLSub &amp; OpenSubtitles)</div>
+          <div class="sub-search-bar" style="display:flex; flex-direction:column; gap:8px;">
+            <input type="text" id="sub-search-query-input" class="sub-search-input focusable" tabindex="0" placeholder="Movie or video title..." style="padding:10px 14px; background:#1e2430; border:1px solid #37474f; border-radius:6px; color:#fff; font-size:14px; width:100%; outline:none;" />
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="sub-lang-select" class="sub-lang-select focusable" tabindex="0" style="flex:1;">
+                <option value="all">All Languages</option>
+                <option value="eng" selected>🇬🇧 English (eng)</option>
+                <option value="spa">🇪🇸 Spanish (Español)</option>
+                <option value="fre">🇫🇷 French (Français)</option>
+                <option value="ger">🇩🇪 German (Deutsch)</option>
+                <option value="ita">🇮🇹 Italian (Italiano)</option>
+                <option value="pob">🇧🇷 Portuguese (Brasil)</option>
+                <option value="por">🇵🇹 Portuguese (Portugal)</option>
+                <option value="rus">🇷🇺 Russian (Русский)</option>
+                <option value="hin">🇮🇳 Hindi (हिन्दी)</option>
+                <option value="tam">🇮🇳 Tamil (தமிழ்)</option>
+                <option value="tel">🇮🇳 Telugu (తెలుగు)</option>
+                <option value="mal">🇮🇳 Malayalam (മലയാളം)</option>
+                <option value="kan">🇮🇳 Kannada (ಕನ್ನಡ)</option>
+                <option value="ara">🇸🇦 Arabic (العربية)</option>
+                <option value="chi">🇨🇳 Chinese (中文)</option>
+                <option value="jpn">🇯🇵 Japanese (日本語)</option>
+                <option value="kor">🇰🇷 Korean (한국어)</option>
+                <option value="tur">🇹🇷 Turkish (Türkçe)</option>
+                <option value="pol">🇵🇱 Polish (Polski)</option>
+                <option value="dut">🇳🇱 Dutch (Nederlands)</option>
+              </select>
+              <button id="btn-search-subs" class="btn btn-primary btn-sm focusable" tabindex="0">🔍 Search Name</button>
+              <button id="btn-search-subs-hash" class="btn btn-secondary btn-sm focusable" tabindex="0" title="OpenSubtitles 64-bit MovieHash match (VLSub)"># Search Hash</button>
+            </div>
+          </div>
+          <div id="sub-search-results" class="sub-search-results">
+            <div class="sub-empty-prompt">Select language or search to load subtitles.</div>
+          </div>
+        </div>
+
+        <!-- Subtitle Sync Offset -->
+        <div class="tv-drawer-section">
+          <div class="tv-drawer-label">⏱️ Subtitle Sync Delay (Fine-Tune Sync)</div>
+          <div class="sub-sync-row">
+            <button id="sub-sync-minus" class="btn btn-secondary btn-sm focusable" tabindex="0" title="Shift earlier 0.5s">-0.5s</button>
+            <span id="sub-sync-display">0.0s</span>
+            <button id="sub-sync-plus" class="btn btn-secondary btn-sm focusable" tabindex="0" title="Shift later 0.5s">+0.5s</button>
+            <button id="sub-sync-reset" class="btn btn-secondary btn-sm focusable" tabindex="0" title="Reset sync">Reset</button>
+          </div>
+        </div>
+
+        <!-- Subtitle Appearance & Style (Font Size & Background) -->
+        <div class="tv-drawer-section">
+          <div class="tv-drawer-label">🎨 Subtitle Appearance &amp; Styling</div>
+          
+          <div class="sub-style-group">
+            <span class="sub-style-title">Font Size</span>
+            <div class="sub-style-pills" id="sub-font-size-group">
+              <button class="sub-style-pill focusable" data-size="18px" tabindex="0">Small (18px)</button>
+              <button class="sub-style-pill active focusable" data-size="24px" tabindex="0">Medium (24px)</button>
+              <button class="sub-style-pill focusable" data-size="32px" tabindex="0">Large (32px)</button>
+              <button class="sub-style-pill focusable" data-size="40px" tabindex="0">Huge (40px)</button>
+            </div>
+          </div>
+
+          <div class="sub-style-group">
+            <span class="sub-style-title">Background &amp; Colors</span>
+            <div class="sub-style-pills" id="sub-bg-group">
+              <button class="sub-style-pill active focusable" data-bg="box" tabindex="0">Black Box</button>
+              <button class="sub-style-pill focusable" data-bg="translucent" tabindex="0">Translucent</button>
+              <button class="sub-style-pill focusable" data-bg="outline" tabindex="0">Outline Only</button>
+              <button class="sub-style-pill focusable" data-bg="yellow" tabindex="0">Yellow Text</button>
+            </div>
+          </div>
+
+          <!-- Live Preview Box -->
+          <div class="sub-preview-wrapper">
+            <div class="sub-preview-screen">
+              <div id="sub-preview-cue" class="sub-preview-cue">Sample Subtitle Preview (4K HDR)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- YouTube-Style In-Player Audio Drawer -->
+    <div id="audio-modal" class="tv-drawer-panel hidden">
+      <div class="tv-drawer-header">
+        <div class="tv-drawer-title-group">
+          <span class="tv-drawer-icon">🔊</span>
+          <span class="tv-drawer-title">Audio Tracks &amp; Surround</span>
+        </div>
+        <button class="tv-drawer-close focusable" id="audio-close-btn" tabindex="0" title="Close Audio (Esc)">✕</button>
+      </div>
+      <div class="tv-drawer-content">
+        <div class="tv-drawer-section">
+          <div class="tv-drawer-label" id="audio-modal-active-badge">Universal AAC Active</div>
+          <div id="audio-track-list" class="sub-active-list">
+            <div class="sub-empty-prompt">🔍 Analyzing audio streams from media...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Settings Modal (Debrid, Adult & Parody Filtering, Free VPN) -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card modal-small">
+      <button class="modal-close focusable" id="settings-close-btn" tabindex="0">✕</button>
+      <h2>⚙️ Settings &amp; Content Preferences</h2>
+      
+      <!-- Content Filters (SafeSearch & Parody Filter) -->
+      <div class="settings-section">
+        <h3>🛡️ Content Moderation &amp; Search Filters</h3>
+        <div class="checkbox-group">
+          <label class="checkbox-label focusable" tabindex="0">
+            <input type="checkbox" id="filter-adult-check" checked>
+            <span><strong>🔞 Restrict Mature &amp; Adult Content</strong> (Filter out 18+, NSFW, and erotic titles)</span>
+          </label>
+        </div>
+        <div class="checkbox-group" style="margin-top:10px;">
+          <label class="checkbox-label focusable" tabindex="0">
+            <input type="checkbox" id="filter-parodies-check" checked>
+            <span><strong>⭐ Filter Parodies &amp; Knockoffs</strong> (Show only original &amp; blockbuster releases)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Debrid Configuration -->
+      <div class="settings-section" style="margin-top:16px;">
+        <h3>⚡ Real-Debrid / AllDebrid Acceleration</h3>
+        <p class="settings-desc">
+          Pairing an API token unlocks instant 4K playback from high-speed CDNs with 0 wait time.
+        </p>
+        <div class="form-group">
+          <label for="rd-token-input">Real-Debrid API Token (Optional):</label>
+          <input type="password" id="rd-token-input" class="input-field focusable" placeholder="Paste your API token here" tabindex="0">
+          <small><a href="https://real-debrid.com/apitoken" target="_blank" class="link focusable" tabindex="0">Get your Real-Debrid API token ↗</a></small>
+        </div>
+      </div>
+
+      <!-- Free VPN & Privacy Guide -->
+      <div class="vpn-guide-box">
+        <h3>🛡️ Free VPN &amp; Privacy for Sony Bravia (Google TV)</h3>
+        <p>To bypass ISP throttling, DNS blocks, and stream anonymously with zero cost:</p>
+        <ul class="vpn-list">
+          <li>
+            <strong>1. Instant 0-Install Fix (Private DNS):</strong><br>
+            On TV: <em>Settings → Network &amp; Internet → Private DNS</em> → Enter <code>one.one.one.one</code> (Cloudflare encrypted DNS). Bypasses 100% of ISP tracker blocks.
+          </li>
+          <li>
+            <strong>2. Cloudflare WARP (Free WireGuard VPN):</strong><br>
+            Fastest free tunnel with edge servers in India (Mumbai, Delhi, Bangalore) — 0 throttling.
+          </li>
+          <li>
+            <strong>3. ProtonVPN Free (Official Android TV App):</strong><br>
+            Install directly from Google Play Store on your Sony TV. Unlimited free data, no logs, P2P allowed.
+          </li>
+        </ul>
+      </div>
+
+      <!-- OTA Software Updates -->
+      <div class="settings-section" style="margin-top:16px;">
+        <h3>🚀 System &amp; Software Updates</h3>
+        <p class="settings-desc">
+          StreamBravia can check GitHub releases and update itself automatically over-the-air.
+        </p>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+          <div>
+            <div style="font-size:13px; font-weight:600; color:#f8fafc;">Current Version: <span id="settings-app-version" style="color:var(--accent-orange-bright);">v1.0.0</span></div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Repo: <span id="settings-repo-name">renopraveen/StreamBravia</span></div>
+          </div>
+          <button id="btn-settings-check-update" class="btn btn-secondary btn-sm focusable" tabindex="0">🔄 Check for Updates</button>
+        </div>
+        <div id="settings-update-status" style="font-size:12px; margin-top:8px; min-height:16px;"></div>
+      </div>
+
+      <!-- Live Diagnostics & Logs -->
+      <div class="settings-section" style="margin-top:16px;">
+        <h3>📋 Swarm Telemetry &amp; Server Logs</h3>
+        <p class="settings-desc">
+          Inspect real-time peer handshakes, piece pipelines, buffer rates, and network logs.
+        </p>
+        <div style="margin-top:10px;">
+          <button id="btn-open-logs-from-settings" class="btn btn-secondary focusable" tabindex="0">📋 View Live Diagnostics &amp; Swarm Logs</button>
+        </div>
+      </div>
+
+      <div class="form-status" id="settings-status"></div>
+
+      <div class="form-actions">
+        <button id="save-settings-btn" class="btn btn-primary focusable" tabindex="0">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- OTA Software Update Popup Modal -->
+  <div id="update-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card modal-update">
+      <button class="modal-close focusable" id="update-close-btn" tabindex="0">✕</button>
+      <div class="update-header">
+        <div class="update-icon-badge">🚀</div>
+        <div class="update-title-group">
+          <h2>New Update Available</h2>
+          <div class="update-version-row">
+            <span class="badge-version-old" id="update-old-version">v1.0.0</span>
+            <span class="update-arrow">→</span>
+            <span class="badge-version-new" id="update-new-version">v1.0.1</span>
+            <span class="badge-size" id="update-size-badge">35.4 MB</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="update-release-title" id="update-release-title">Release Notes</div>
+
+      <div class="update-changelog-box" id="update-changelog">
+        Loading release details...
+      </div>
+
+      <!-- Download Progress Bar -->
+      <div id="update-progress-container" class="update-progress-container hidden">
+        <div class="update-progress-bar-bg">
+          <div id="update-progress-bar" class="update-progress-bar-fill" style="width: 0%;"></div>
+        </div>
+        <div class="update-progress-info">
+          <span id="update-progress-text">Downloading update from GitHub...</span>
+          <span id="update-progress-pct">0%</span>
+        </div>
+      </div>
+
+      <div class="update-actions" id="update-actions-row">
+        <button id="btn-update-install" class="btn btn-primary focusable" tabindex="0">⬇️ Download &amp; Install Now</button>
+        <button id="btn-update-later" class="btn btn-secondary focusable" tabindex="0">Remind Me Later</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Diagnostics & Logs Modal -->
+  <div id="logs-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card modal-large">
+      <button class="modal-close focusable" id="logs-close-btn" tabindex="0">✕</button>
+      <div class="logs-header">
+        <h2>📋 Live Diagnostics &amp; Server Activity Logs</h2>
+        <div class="logs-actions">
+          <button id="logs-refresh-btn" class="btn btn-secondary btn-sm focusable" tabindex="0">🔄 Refresh</button>
+          <button id="logs-clear-btn" class="btn btn-secondary btn-sm focusable" tabindex="0">🗑️ Clear</button>
+        </div>
+      </div>
+      <div id="logs-terminal" class="logs-terminal">
+        <div class="log-line">Connecting to live log stream...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voice Search HUD Overlay -->
+  <div id="voice-overlay" class="voice-overlay hidden">
+    <div class="voice-card">
+      <div class="voice-mic-container">
+        <div class="voice-pulse-ring" id="voice-pulse-ring"></div>
+        <div class="voice-mic-icon">🎙️</div>
+      </div>
+      <h2 class="voice-title" id="voice-title">Listening...</h2>
+      <p class="voice-subtitle" id="voice-subtitle">Speak a movie or TV show name</p>
+      <div class="voice-wave-container" id="voice-wave">
+        <span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+      </div>
+      <p class="voice-hint">Speak clearly • Pause to search • Press Back to cancel</p>
+    </div>
+  </div>
+
+  <!-- Toast Notification System -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Episode Transition Overlay (stays inside player) -->
+  <div id="ep-transition-overlay" class="hidden">
+    <div class="ep-transition-spinner"></div>
+    <div class="ep-transition-text" id="ep-transition-text">Loading next episode...</div>
+    <div class="ep-transition-sub" id="ep-transition-sub">Finding best stream...</div>
+  </div>
+
+  <!-- Apple TV Style Context / Action Menu -->
+  <div id="context-menu-modal" class="modal-backdrop hidden">
+    <div class="apple-context-sheet">
+      <div class="context-card-header">
+        <img id="context-poster" class="context-poster" src="" alt="Poster">
+        <div class="context-meta">
+          <h3 id="context-title" class="context-title">Movie Title</h3>
+          <div id="context-subtitle" class="context-subtitle">2026 • Movie • ★ 8.8</div>
+        </div>
+      </div>
+      <div class="context-actions-list">
+        <button class="ctx-action-btn focusable primary" id="ctx-resume" tabindex="0">▶ Watch / Play Now</button>
+        <button class="ctx-action-btn focusable" id="ctx-details" tabindex="0">ℹ Details &amp; Streams</button>
+        <button class="ctx-action-btn focusable" id="ctx-start-over" tabindex="0">↺ Play from Beginning</button>
+        <button class="ctx-action-btn focusable" id="ctx-recommend" tabindex="0">👍 More Like This (Recommend)</button>
+        <button class="ctx-action-btn focusable danger" id="ctx-dontrec" tabindex="0">👎 Not Interested (Hide)</button>
+        <button class="ctx-action-btn focusable danger hidden" id="ctx-remove" tabindex="0">🗑️ Remove from Continue Watching</button>
+        <button class="ctx-action-btn focusable secondary" id="ctx-close" tabindex="0">✕ Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Subtitle Sync Controls (added inside drawer dynamically) -->
+
+  <script src="hls.min.js"></script>
+  <script src="app.js?v=2.6.0"></script>
+</body>
+</html>
