@@ -103,6 +103,7 @@ public class TorrentEngine {
     private CountDownLatch mMetadataLatch;
     private int mLastWindowPiece = -1;
     private final ScheduledExecutorService mHarvesterExecutor = Executors.newSingleThreadScheduledExecutor();
+    private final CountDownLatch mSessionInitLatch = new CountDownLatch(1);
 
     public static synchronized TorrentEngine getInstance(Context context) {
         if (sInstance == null) {
@@ -121,10 +122,20 @@ public class TorrentEngine {
         if (!mMetadataDir.exists()) {
             mMetadataDir.mkdirs();
         }
-        // Safety Sweep: Purge any stale cache from prior TV reboots/crashes
-        purgeCache();
-        trimMetadataCache(25);
-        initSession();
+        // Safety Sweep: Purge any stale cache from prior TV reboots/crashes in background
+        new Thread(() -> {
+            purgeCache();
+            trimMetadataCache(25);
+        }, "StreamBraviaCacheSweep").start();
+
+        // Initialize libtorrent session on background thread to prevent UI thread blocking on app start
+        new Thread(this::initSession, "StreamBraviaEngineInit").start();
+    }
+
+    public void awaitSessionReady(long maxWaitMs) {
+        try {
+            mSessionInitLatch.await(maxWaitMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ignored) {}
     }
 
     private TorrentHandle getHandle() {
@@ -132,6 +143,7 @@ public class TorrentEngine {
     }
 
     private TorrentHandle getHandle(long maxWaitMs) {
+        awaitSessionReady(maxWaitMs > 0 ? maxWaitMs : 1000);
         String hash = mActiveHash;
         if (mSession == null || hash == null || hash.isEmpty() || !mSession.isRunning()) return null;
         Sha1Hash sha;
@@ -287,6 +299,8 @@ public class TorrentEngine {
             Log.i(TAG, "libtorrent4j session started with 1GB Fire TV Stick memory-safe profile, Centrifuge filter & DHT nodes");
         } catch (Throwable t) {
             Log.e(TAG, "Error starting libtorrent4j session: " + t.getMessage(), t);
+        } finally {
+            mSessionInitLatch.countDown();
         }
     }
 
@@ -382,6 +396,7 @@ public class TorrentEngine {
      * Start streaming a torrent given an infoHash or magnet link.
      */
     public boolean prepareStream(String magnetOrHash, long timeoutSeconds) {
+        awaitSessionReady(10000);
         String hash = extractHash(magnetOrHash);
         if (hash == null || hash.isEmpty()) hash = magnetOrHash.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
 
@@ -393,16 +408,11 @@ public class TorrentEngine {
                 if (mIsMetadataReady.get() && mActiveTorrentInfo != null) {
                     TorrentHandle h = getHandle();
                     if (h != null && h.isValid()) {
-                        enrichTrackers(h, magnetOrHash);
-                        Log.i(TAG, "Torrent stream already active and ready: " + hash);
+                        // Fast path: Do NOT re-announce or force DHT on every HTTP range request!
                         return true;
                     }
                 }
                 if (mMetadataLatch != null && mMetadataLatch.getCount() > 0) {
-                    TorrentHandle h = getHandle();
-                    if (h != null && h.isValid()) {
-                        enrichTrackers(h, magnetOrHash);
-                    }
                     Log.i(TAG, "Waiting for ongoing metadata fetch for hash: " + hash);
                     latchToAwait = mMetadataLatch;
                 }
@@ -511,16 +521,46 @@ public class TorrentEngine {
         FileStorage fs = ti.files();
         int numFiles = fs.numFiles();
         long maxBytes = 0;
-        int targetIdx = 0;
+        int targetIdx = -1;
 
-        // Find the largest file (the movie/video file)
+        // Smart Video File Selector:
+        // 1. Identify files with common video extensions (.mkv, .mp4, .avi, .ts, .m4v, .webm, .mov)
+        // 2. Ignore samples (e.g. filename contains "sample", or file size < 50MB when larger video exists)
+        // 3. Select the primary full-length movie/episode video file
+        List<Integer> videoIndices = new ArrayList<>();
         for (int i = 0; i < numFiles; i++) {
+            String path = fs.filePath(i).toLowerCase();
             long sz = fs.fileSize(i);
-            if (sz > maxBytes) {
-                maxBytes = sz;
-                targetIdx = i;
+            if (path.endsWith(".mkv") || path.endsWith(".mp4") || path.endsWith(".avi")
+                    || path.endsWith(".ts") || path.endsWith(".m4v") || path.endsWith(".webm") || path.endsWith(".mov")) {
+                boolean isSample = path.contains("sample") || (sz < 50L * 1024L * 1024L);
+                if (!isSample) {
+                    videoIndices.add(i);
+                }
             }
         }
+
+        if (!videoIndices.isEmpty()) {
+            for (int idx : videoIndices) {
+                long sz = fs.fileSize(idx);
+                if (sz > maxBytes) {
+                    maxBytes = sz;
+                    targetIdx = idx;
+                }
+            }
+        }
+
+        // Fallback: If no extension matched or all were < 50MB, pick the largest file overall
+        if (targetIdx == -1 || maxBytes <= 0) {
+            for (int i = 0; i < numFiles; i++) {
+                long sz = fs.fileSize(i);
+                if (sz > maxBytes) {
+                    maxBytes = sz;
+                    targetIdx = i;
+                }
+            }
+        }
+        if (targetIdx == -1) targetIdx = 0;
 
         int totalPieces = ti.numPieces();
         int maxValidPiece = Math.max(0, totalPieces - 1);
@@ -739,12 +779,12 @@ public class TorrentEngine {
         int p = clampPiece(pieceIndex);
         synchronized (mLock) {
             TorrentHandle h = getHandle();
-            if (h == null || mActiveTorrentInfo == null) return true;
-            if (p < mStartPiece || p > mEndPiece) return true;
+            if (h == null || mActiveTorrentInfo == null) return false;
+            if (p < mStartPiece || p > mEndPiece) return false;
             try {
                 if (h.havePiece(p)) return true;
                 h.piecePriority(p, Priority.TOP_PRIORITY);
-                h.setPieceDeadline(p, 60);
+                h.setPieceDeadline(p, 0); // Immediate deadline for blocking playback reads
             } catch (Throwable ignored) {}
         }
 
@@ -753,6 +793,7 @@ public class TorrentEngine {
             long deadline = System.currentTimeMillis() + timeoutMs;
             while (System.currentTimeMillis() < deadline) {
                 if (isPieceDownloaded(p)) return true;
+                if (mActiveHash == null) return false;
                 long remaining = deadline - System.currentTimeMillis();
                 if (remaining <= 0) break;
                 try {

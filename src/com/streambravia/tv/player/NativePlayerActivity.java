@@ -150,30 +150,39 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
     // Aspect Ratio toggle
     private int mAspectModeIndex = 0; // 0: FIT, 1: ZOOM, 2: FILL
 
+    private static final java.util.concurrent.ExecutorService sStatsExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
     private final Handler mUiHandler = new Handler(Looper.getMainLooper());
     private final Runnable mHideOsdRunnable = this::hideOsd;
     private final Runnable mBufferingStatsRunnable = new Runnable() {
         @Override
         public void run() {
-            if (mLoadingSpinner != null && mLoadingSpinner.getVisibility() == View.VISIBLE) {
-                try {
-                    com.streambravia.tv.engine.TorrentEngine eng = com.streambravia.tv.engine.TorrentEngine.getInstance(NativePlayerActivity.this);
-                    org.libtorrent4j.TorrentStatus st = eng.getStatus();
-                    if (st != null && mBufferingStatusText != null) {
-                        int seeds = st.numSeeds();
-                        int peers = st.numPeers();
-                        long rate = st.downloadRate();
-                        float prog = st.progress() * 100f;
-                        if (rate > 0) {
-                            double speedMb = rate / (1024.0 * 1024.0);
-                            mBufferingStatusText.setText(String.format(Locale.US, "Buffering... %.2f MB/s • %d Seeds (%.1f%%)", speedMb, seeds, prog));
-                        } else if (peers > 0 || seeds > 0) {
-                            mBufferingStatusText.setText(String.format(Locale.US, "Connected to %d peers (%d seeds) • Initializing...", peers, seeds));
-                        } else {
-                            mBufferingStatusText.setText("Connecting to swarm trackers & DHT...");
+            if (mLoadingSpinner != null && mLoadingSpinner.getVisibility() == View.VISIBLE && !isFinishing()) {
+                sStatsExecutor.execute(() -> {
+                    try {
+                        com.streambravia.tv.engine.TorrentEngine eng = com.streambravia.tv.engine.TorrentEngine.getInstance(NativePlayerActivity.this);
+                        org.libtorrent4j.TorrentStatus st = (eng != null) ? eng.getStatus() : null;
+                        if (st != null) {
+                            int seeds = st.numSeeds();
+                            int peers = st.numPeers();
+                            long rate = st.downloadRate();
+                            float prog = st.progress() * 100f;
+                            final String statusText;
+                            if (rate > 0) {
+                                double speedMb = rate / (1024.0 * 1024.0);
+                                statusText = String.format(Locale.US, "Buffering... %.2f MB/s • %d Seeds (%.1f%%)", speedMb, seeds, prog);
+                            } else if (peers > 0 || seeds > 0) {
+                                statusText = String.format(Locale.US, "Connected to %d peers (%d seeds) • Initializing...", peers, seeds);
+                            } else {
+                                statusText = "Connecting to swarm trackers & DHT...";
+                            }
+                            mUiHandler.post(() -> {
+                                if (mBufferingStatusText != null && !isFinishing()) {
+                                    mBufferingStatusText.setText(statusText);
+                                }
+                            });
                         }
-                    }
-                } catch (Throwable ignored) {}
+                    } catch (Throwable ignored) {}
+                });
                 mUiHandler.postDelayed(this, 500);
             }
         }
@@ -414,34 +423,36 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
                     mUiHandler.removeCallbacks(mBufferingStatsRunnable);
                     mUiHandler.post(mBufferingStatsRunnable);
 
-                    // Signal torrent engine to prioritize the seek position
-                    new Thread(new Runnable() {
-                        @Override
-                        public void run() {
-                            try {
-                                com.streambravia.tv.engine.TorrentEngine eng = com.streambravia.tv.engine.TorrentEngine.getInstance(NativePlayerActivity.this);
-                                if (eng != null && eng.getTargetFileSize() > 0 && mExoPlayer != null) {
-                                    long dur = mExoPlayer.getDuration();
-                                    if (dur > 0) {
-                                        long byteOffset = (long) ((resumePos * 1.0 / dur) * eng.getTargetFileSize());
-                                        eng.prioritizeByteOffset(byteOffset);
-                                    }
-                                }
-                            } catch (Throwable ignored) {}
-                        }
-                    }).start();
-
-                    mUiHandler.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (mExoPlayer != null && !isFinishing()) {
-                                Log.i(TAG, "Executing auto-recovery seek to " + resumePos + "ms...");
-                                mExoPlayer.seekTo(resumePos);
-                                mExoPlayer.prepare();
-                                mExoPlayer.play();
-                            }
+                    mUiHandler.postDelayed(() -> {
+                        if (mExoPlayer != null && !isFinishing()) {
+                            Log.i(TAG, "Executing auto-recovery seek to " + resumePos + "ms...");
+                            mExoPlayer.seekTo(resumePos);
+                            mExoPlayer.prepare();
+                            mExoPlayer.play();
                         }
                     }, 2000);
+                    return;
+                }
+
+                // Inspect HTTP status codes from local proxy server
+                int httpStatusCode = 0;
+                Throwable cause = error.getCause();
+                while (cause != null) {
+                    if (cause instanceof androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                        httpStatusCode = ((androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) cause).responseCode;
+                        break;
+                    }
+                    cause = cause.getCause();
+                }
+
+                // RFC 7233 416 Range Not Satisfiable: playhead attempted to read past end of file
+                if (httpStatusCode == 416 && mExoPlayer != null) {
+                    long dur = mExoPlayer.getDuration();
+                    long fallbackPos = (dur > 6000) ? dur - 6000 : 0;
+                    Log.w(TAG, "HTTP 416 Range Not Satisfiable. Re-aligning playhead to " + fallbackPos + "ms...");
+                    mExoPlayer.seekTo(fallbackPos);
+                    mExoPlayer.prepare();
+                    mExoPlayer.play();
                     return;
                 }
 
@@ -450,20 +461,17 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
                         || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
                         || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
                         || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_UNSPECIFIED) {
-                    Log.w(TAG, "Swarm buffering or transient IO error (" + error.getErrorCodeName() + "), auto-reconnecting in 1.5s...");
+                    Log.w(TAG, "Swarm buffering or transient IO error (" + error.getErrorCodeName() + " / HTTP " + httpStatusCode + "), auto-reconnecting in 1.5s...");
                     mLoadingSpinner.setVisibility(View.VISIBLE);
                     mBufferingStatusText.setVisibility(View.VISIBLE);
                     mBufferingStatusText.setText("Connecting to swarm trackers & DHT...");
                     mUiHandler.removeCallbacks(mBufferingStatsRunnable);
                     mUiHandler.post(mBufferingStatsRunnable);
-                    mUiHandler.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (mExoPlayer != null && !isFinishing()) {
-                                Log.i(TAG, "Auto-retrying ExoPlayer after swarm buffer catchup...");
-                                mExoPlayer.prepare();
-                                mExoPlayer.play();
-                            }
+                    mUiHandler.postDelayed(() -> {
+                        if (mExoPlayer != null && !isFinishing()) {
+                            Log.i(TAG, "Auto-retrying ExoPlayer after swarm buffer catchup...");
+                            mExoPlayer.prepare();
+                            mExoPlayer.play();
                         }
                     }, 1500);
                     return;
@@ -987,22 +995,6 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
                 final long target = mPendingSeekTargetMs;
                 mPendingSeekTargetMs = -1;
                 mExoPlayer.seekTo(target);
-                // Signal torrent engine to prioritize the seek position immediately
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            com.streambravia.tv.engine.TorrentEngine eng = com.streambravia.tv.engine.TorrentEngine.getInstance(NativePlayerActivity.this);
-                            if (eng != null && eng.getTargetFileSize() > 0 && mExoPlayer != null) {
-                                long dur = mExoPlayer.getDuration();
-                                if (dur > 0) {
-                                    long byteOffset = (long) ((target * 1.0 / dur) * eng.getTargetFileSize());
-                                    eng.prioritizeByteOffset(byteOffset);
-                                }
-                            }
-                        } catch (Throwable ignored) {}
-                    }
-                }).start();
             }
         }
     };

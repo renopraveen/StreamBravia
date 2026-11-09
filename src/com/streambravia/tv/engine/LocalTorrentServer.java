@@ -70,6 +70,16 @@ public class LocalTorrentServer extends NanoHTTPD {
     }
     private final Map<String, CatalogCacheEntry> mCatalogResponseCache = new java.util.concurrent.ConcurrentHashMap<>();
 
+    private static class RecCacheEntry {
+        final String json;
+        final long expiresAt;
+        RecCacheEntry(String json, long ttlMs) {
+            this.json = json;
+            this.expiresAt = System.currentTimeMillis() + ttlMs;
+        }
+    }
+    private volatile RecCacheEntry mRecommendationsCache = null;
+
     private static String normalizeTitle(String title) {
         if (title == null) return "";
         String s = title.toLowerCase().trim();
@@ -1377,27 +1387,41 @@ public class LocalTorrentServer extends NanoHTTPD {
             return resp;
         }
 
-        // Parse HTTP Range header from ExoPlayer
+        // Parse HTTP Range header from ExoPlayer (RFC 7233 compliant)
         long startByte = 0;
         long endByte = totalLength - 1;
         String rangeHeader = headers.get("range");
+        boolean isRangeRequest = false;
 
         if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
             String cleanRange = rangeHeader.substring(6).trim();
             int dashPos = cleanRange.indexOf('-');
             if (dashPos != -1) {
+                isRangeRequest = true;
                 String startPart = cleanRange.substring(0, dashPos).trim();
                 String endPart = cleanRange.substring(dashPos + 1).trim();
                 try {
-                    if (!startPart.isEmpty()) {
+                    if (!startPart.isEmpty() && !endPart.isEmpty()) {
                         startByte = Long.parseLong(startPart);
-                    }
-                    if (!endPart.isEmpty()) {
                         endByte = Long.parseLong(endPart);
+                    } else if (!startPart.isEmpty() && endPart.isEmpty()) {
+                        startByte = Long.parseLong(startPart);
+                        endByte = totalLength - 1;
+                    } else if (startPart.isEmpty() && !endPart.isEmpty()) {
+                        // Suffix range: bytes=-N (request last N bytes)
+                        long suffixLen = Long.parseLong(endPart);
+                        startByte = Math.max(0, totalLength - suffixLen);
+                        endByte = totalLength - 1;
                     }
-                } catch (NumberFormatException ignored) {
-                }
+                } catch (NumberFormatException ignored) {}
             }
+        }
+
+        // Validate range bounds (RFC 7233 416 Range Not Satisfiable)
+        if (isRangeRequest && (startByte >= totalLength || startByte > endByte || startByte < 0)) {
+            Response resp = newFixedLengthResponse(Response.Status.RANGE_NOT_SATISFIABLE, "text/plain", "Requested Range Not Satisfiable");
+            resp.addHeader("Content-Range", "bytes */" + totalLength);
+            return resp;
         }
 
         if (endByte >= totalLength) {
@@ -1414,8 +1438,11 @@ public class LocalTorrentServer extends NanoHTTPD {
 
         try {
             InputStream stream = new TorrentRangeInputStream(targetFile, mEngine, startByte, contentLength);
-            Response response = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mimeType, stream, contentLength);
-            response.addHeader("Content-Range", "bytes " + startByte + "-" + endByte + "/" + totalLength);
+            Response.Status status = isRangeRequest ? Response.Status.PARTIAL_CONTENT : Response.Status.OK;
+            Response response = newFixedLengthResponse(status, mimeType, stream, contentLength);
+            if (isRangeRequest) {
+                response.addHeader("Content-Range", "bytes " + startByte + "-" + endByte + "/" + totalLength);
+            }
             response.addHeader("Accept-Ranges", "bytes");
             response.addHeader("Content-Length", String.valueOf(contentLength));
             response.addHeader("Connection", "keep-alive");
@@ -1562,6 +1589,11 @@ public class LocalTorrentServer extends NanoHTTPD {
     }
 
     private Response handleRecommendationsRequest() {
+        RecCacheEntry cached = mRecommendationsCache;
+        if (cached != null && System.currentTimeMillis() < cached.expiresAt) {
+            return jsonResponse(cached.json);
+        }
+
         WatchHistoryRepository repo = WatchHistoryRepository.getInstance(mContext);
         List<String> topGenres = repo.getTopFavoriteGenres();
         Set<String> disliked = repo.getDislikedIds();
@@ -1570,26 +1602,42 @@ public class LocalTorrentServer extends NanoHTTPD {
         JSONArray recItems = new JSONArray();
         Set<String> addedIds = new HashSet<>();
 
-        for (String genre : topGenres) {
-            if (recItems.length() >= 20) break;
-            try {
-                String url = CINEMETA_BASE + "/catalog/movie/top/genre=" + URLEncoder.encode(genre, "UTF-8") + ".json";
-                String json = httpGet(url);
-                if (json != null) {
-                    JSONObject root = new JSONObject(json);
-                    JSONArray metas = root.optJSONArray("metas");
-                    if (metas != null) {
-                        for (int i = 0; i < metas.length() && recItems.length() < 25; i++) {
-                            JSONObject m = metas.getJSONObject(i);
-                            String mid = m.optString("id");
-                            if (!mid.isEmpty() && !disliked.contains(mid) && !watched.contains(mid) && !addedIds.contains(mid)) {
-                                addedIds.add(mid);
-                                recItems.put(m);
+        if (!topGenres.isEmpty()) {
+            List<String> urls = new ArrayList<>();
+            for (String genre : topGenres) {
+                try {
+                    urls.add(CINEMETA_BASE + "/catalog/movie/top/genre=" + URLEncoder.encode(genre, "UTF-8") + ".json");
+                } catch (Exception ignored) {}
+            }
+
+            int poolSize = Math.min(4, Math.max(1, urls.size()));
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(poolSize);
+            List<java.util.concurrent.Future<String>> futures = new ArrayList<>();
+            for (final String u : urls) {
+                futures.add(pool.submit(() -> httpGet(u)));
+            }
+            pool.shutdown();
+
+            for (java.util.concurrent.Future<String> f : futures) {
+                if (recItems.length() >= 25) break;
+                try {
+                    String json = f.get(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    if (json != null) {
+                        JSONObject root = new JSONObject(json);
+                        JSONArray metas = root.optJSONArray("metas");
+                        if (metas != null) {
+                            for (int i = 0; i < metas.length() && recItems.length() < 25; i++) {
+                                JSONObject m = metas.getJSONObject(i);
+                                String mid = m.optString("id");
+                                if (!mid.isEmpty() && !disliked.contains(mid) && !watched.contains(mid) && !addedIds.contains(mid)) {
+                                    addedIds.add(mid);
+                                    recItems.put(m);
+                                }
                             }
                         }
                     }
-                }
-            } catch (Exception ignored) {}
+                } catch (Exception ignored) {}
+            }
         }
 
         JSONObject res = new JSONObject();
@@ -1598,7 +1646,10 @@ public class LocalTorrentServer extends NanoHTTPD {
             res.put("items", recItems);
             res.put("genres", new JSONArray(topGenres));
         } catch (Exception ignored) {}
-        return jsonResponse(res.toString());
+
+        String outJson = res.toString();
+        mRecommendationsCache = new RecCacheEntry(outJson, 15 * 60 * 1000L); // Cache 15 minutes
+        return jsonResponse(outJson);
     }
 
     private Response jsonResponse(String json) {
@@ -1628,7 +1679,14 @@ public class LocalTorrentServer extends NanoHTTPD {
             InputStream is = am.open(assetPath);
             String mime = resolveMimeType(uri);
             Response resp = newChunkedResponse(Response.Status.OK, mime, is);
-            resp.addHeader("Cache-Control", "no-cache");
+            String lower = uri.toLowerCase();
+            if (lower.endsWith(".js") || lower.endsWith(".css") || lower.endsWith(".png")
+                    || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".woff2")
+                    || lower.endsWith(".woff") || lower.endsWith(".svg") || lower.endsWith(".ico")) {
+                resp.addHeader("Cache-Control", "public, max-age=86400");
+            } else {
+                resp.addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            }
             resp.addHeader("Access-Control-Allow-Origin", "*");
             return resp;
         } catch (IOException e) {
@@ -1727,6 +1785,7 @@ public class LocalTorrentServer extends NanoHTTPD {
         private int mLastPrioritizedPiece = -1;
         private RandomAccessFile mRaf;
         private final byte[] mSingleByte = new byte[1]; // Reusable single-byte buffer to avoid heap allocations
+        private volatile boolean mClosed = false;
 
         public TorrentRangeInputStream(File file, TorrentEngine engine, long startOffset, long totalLength) throws IOException {
             mFile = file;
@@ -1738,6 +1797,7 @@ public class LocalTorrentServer extends NanoHTTPD {
         }
 
         private void openFile() throws IOException {
+            if (mClosed) return;
             if (mFile.exists()) {
                 mRaf = new RandomAccessFile(mFile, "r");
                 mRaf.seek(mCurrentOffset);
@@ -1753,7 +1813,15 @@ public class LocalTorrentServer extends NanoHTTPD {
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
+            if (len == 0) return 0;
+            if (b == null) throw new NullPointerException("Buffer is null");
+            if (off < 0 || len < 0 || len > b.length - off) throw new IndexOutOfBoundsException();
+            if (mClosed) throw new IOException("Stream closed");
+
             while (true) {
+                if (mClosed) {
+                    throw new IOException("Stream closed");
+                }
                 if (mCurrentOffset >= mStartOffset + mTotalLength) {
                     return -1;
                 }
@@ -1777,12 +1845,15 @@ public class LocalTorrentServer extends NanoHTTPD {
 
                     long waitStart = System.currentTimeMillis();
                     boolean downloaded = false;
-                    while (System.currentTimeMillis() - waitStart < 90000) {
-                        downloaded = mEngine.waitForPiece(pieceIndex, 350);
-                        if (downloaded) break;
+                    while (System.currentTimeMillis() - waitStart < 40000) {
+                        if (mClosed) {
+                            throw new IOException("Stream closed");
+                        }
                         if (mEngine.getActiveHash() == null) {
                             throw new IOException("Stream stopped");
                         }
+                        downloaded = mEngine.waitForPiece(pieceIndex, 350);
+                        if (downloaded) break;
                         // Periodically reinforce urgent piece priorities every 2.5s
                         if ((System.currentTimeMillis() - waitStart) % 2500 < 350) {
                             mEngine.prioritizeSlidingWindow(pieceIndex, 30);
@@ -1800,6 +1871,9 @@ public class LocalTorrentServer extends NanoHTTPD {
                     } else {
                         long waitStart = System.currentTimeMillis();
                         while (mRaf == null) {
+                            if (mClosed) {
+                                throw new IOException("Stream closed");
+                            }
                             if (mFile.exists()) {
                                 openFile();
                                 break;
@@ -1852,6 +1926,9 @@ public class LocalTorrentServer extends NanoHTTPD {
 
                 // Robust retry loop: retry up to 5 times with backoff before declaring EOF
                 for (int retry = 0; retry < 5; retry++) {
+                    if (mClosed) {
+                        throw new IOException("Stream closed");
+                    }
                     try {
                         Thread.sleep(80);
                     } catch (Exception ignored) {}
@@ -1876,6 +1953,7 @@ public class LocalTorrentServer extends NanoHTTPD {
 
         @Override
         public void close() throws IOException {
+            mClosed = true;
             if (mRaf != null) {
                 try {
                     mRaf.close();

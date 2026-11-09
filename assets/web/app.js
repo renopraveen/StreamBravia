@@ -723,8 +723,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setupFilterButtons();
   setupDpadNavigation();
   setupVideoPlayerEvents();
-  renderContinueWatchingRow();
-  renderRecommendationsRow();
 });
 
 function setupEventListeners() {

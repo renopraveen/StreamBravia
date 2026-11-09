@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.streambravia.tv"
-    android:versionCode="18"
-    android:versionName="1.1.7">
+    android:versionCode="19"
+    android:versionName="1.1.8">
 
     <uses-sdk
         android:minSdkVersion="26"
@@ -101,7 +101,7 @@
             android:name="com.streambravia.tv.player.NativePlayerActivity"
             android:screenOrientation="landscape"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout"
-            android:exported="true" />
+            android:exported="false" />
 
         <!-- Fire TV & Android TV Global Voice Search Content Provider -->
         <provider
