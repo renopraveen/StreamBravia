@@ -118,8 +118,7 @@ public class MainActivity extends Activity {
 
         // Start embedded Standalone Torrent Server on TV localhost (127.0.0.1:7878)
         try {
-            mLocalServer = new LocalTorrentServer(this);
-            mLocalServer.start();
+            mLocalServer = LocalTorrentServer.getInstance(this);
         } catch (Throwable t) {
             android.util.Log.e("StreamBraviaTV", "Failed to start local standalone server: " + t.getMessage(), t);
         }
@@ -830,13 +829,8 @@ public class MainActivity extends Activity {
             mVoiceSearchManager.cancel();
             mVoiceSearchManager = null;
         }
-        if (mLocalServer != null) {
-            try {
-                mLocalServer.stop();
-            } catch (Exception ignored) {}
-            mLocalServer = null;
-        }
-        TorrentEngine.getInstance(this).onDestroy();
+        // Retain process-level LocalTorrentServer and TorrentEngine for background playback / NativePlayerActivity
+        mLocalServer = null;
 
         if (mWebView != null) {
             mWebView.destroy();

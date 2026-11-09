@@ -150,6 +150,10 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
     // Aspect Ratio toggle
     private int mAspectModeIndex = 0; // 0: FIT, 1: ZOOM, 2: FILL
 
+    // Seek generation tracking
+    private volatile boolean mIsSeeking = false;
+    private volatile long mSeekGeneration = 0;
+
     private static final java.util.concurrent.ExecutorService sStatsExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
     private final Handler mUiHandler = new Handler(Looper.getMainLooper());
     private final Runnable mHideOsdRunnable = this::hideOsd;
@@ -201,6 +205,10 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Ensure process-level LocalTorrentServer and TorrentEngine are running
+        com.streambravia.tv.engine.LocalTorrentServer.getInstance(this);
+        com.streambravia.tv.engine.TorrentEngine.getInstance(this);
 
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -368,17 +376,26 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
             }
 
             @Override
+            public void onRenderedFirstFrame() {
+                mIsSeeking = false;
+                mLoadingSpinner.setVisibility(View.GONE);
+                mBufferingStatusText.setVisibility(View.GONE);
+            }
+
+            @Override
             public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_BUFFERING) {
                     mLoadingSpinner.setVisibility(View.VISIBLE);
                     mBufferingStatusText.setVisibility(View.VISIBLE);
                     mUiHandler.post(mBufferingStatsRunnable);
                 } else if (state == Player.STATE_READY) {
+                    mIsSeeking = false;
                     mLoadingSpinner.setVisibility(View.GONE);
                     mBufferingStatusText.setVisibility(View.GONE);
                     mUiHandler.removeCallbacks(mBufferingStatsRunnable);
                     updateProgress();
                 } else if (state == Player.STATE_ENDED) {
+                    mIsSeeking = false;
                     finishWithResult();
                 }
             }
@@ -389,6 +406,7 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
                     mBtnPlayPause.setText(isPlaying ? "⏸ Pause" : "▶ Play");
                 }
                 if (isPlaying) {
+                    mIsSeeking = false;
                     mLoadingSpinner.setVisibility(View.GONE);
                     mBufferingStatusText.setVisibility(View.GONE);
                     mUiHandler.removeCallbacks(mBufferingStatsRunnable);
@@ -414,7 +432,9 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
                 }
 
                 // If mid-stream error during playback (e.g. transient swarm buffer pause, container parser hiccup, IO timeout)
-                if (mLastKnownPositionMs > 3000) {
+                // Strictly guard with !mIsSeeking to prevent overriding user seeking operations with old position!
+                if (mLastKnownPositionMs > 3000 && !mIsSeeking) {
+                    final long currentGen = mSeekGeneration;
                     final long resumePos = Math.max(0, mLastKnownPositionMs - 2500);
                     Log.w(TAG, "Mid-stream error (" + error.getErrorCodeName() + ") at " + mLastKnownPositionMs + "ms. Auto-recovering at " + resumePos + "ms...");
                     mLoadingSpinner.setVisibility(View.VISIBLE);
@@ -425,6 +445,10 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
 
                     mUiHandler.postDelayed(() -> {
                         if (mExoPlayer != null && !isFinishing()) {
+                            if (mSeekGeneration != currentGen || mIsSeeking) {
+                                Log.i(TAG, "Ignoring stale auto-recovery seek; new user seek generation in progress");
+                                return;
+                            }
                             Log.i(TAG, "Executing auto-recovery seek to " + resumePos + "ms...");
                             mExoPlayer.seekTo(resumePos);
                             mExoPlayer.prepare();
@@ -605,6 +629,8 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
                 if (mExoPlayer != null) {
                     long dur = mExoPlayer.getDuration();
                     if (dur > 0) {
+                        mIsSeeking = true;
+                        mSeekGeneration++;
                         mExoPlayer.seekTo((dur * seekBar.getProgress()) / 1000);
                     }
                 }
@@ -1001,6 +1027,8 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
 
     private void seekRelative(long deltaMs) {
         if (mExoPlayer == null) return;
+        mIsSeeking = true;
+        mSeekGeneration++;
         long dur = mExoPlayer.getDuration();
         long basePos = (mPendingSeekTargetMs >= 0) ? mPendingSeekTargetMs : mExoPlayer.getCurrentPosition();
         long target = Math.max(0, (dur > 0) ? Math.min(dur, basePos + deltaMs) : basePos + deltaMs);

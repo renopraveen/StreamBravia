@@ -214,9 +214,9 @@ public class TorrentEngine {
             sp.setInteger(settings_pack.int_types.dht_max_peers_reply.swigValue(), 100);
             sp.setInteger(settings_pack.int_types.initial_picker_threshold.swigValue(), 4);
 
-            // Aggressive DHT & sequential scheduling
+            // Aggressive DHT scheduling
             sp.setBoolean(settings_pack.bool_types.dht_aggressive_lookups.swigValue(), true);
-            sp.setBoolean(settings_pack.bool_types.auto_sequential.swigValue(), true);
+            sp.setBoolean(settings_pack.bool_types.auto_sequential.swigValue(), false);
 
             // Deep pipelining tuned for TV: request queue 500 blocks for maximum throughput without memory exhaustion
             sp.setInteger(settings_pack.int_types.max_out_request_queue.swigValue(), 500);
@@ -449,7 +449,7 @@ public class TorrentEngine {
                             mActiveTorrentInfo = ti;
                         }
                         Log.i(TAG, "⚡ Instant Cache Hit: Loaded metadata for " + hash + " (" + ti.name() + ")");
-                        mSession.download(ti, mCacheDir, null, null, null, TorrentFlags.AUTO_MANAGED.or_(TorrentFlags.SEQUENTIAL_DOWNLOAD));
+                        mSession.download(ti, mCacheDir, null, null, null, TorrentFlags.AUTO_MANAGED);
                         TorrentHandle h = getHandle(2500);
                         if (h != null && h.isValid()) {
                             enrichTrackers(h, magnetOrHash);
@@ -473,7 +473,7 @@ public class TorrentEngine {
                     String magnetUri = magnetOrHash.startsWith("magnet:?") ? magnetOrHash : buildMagnetUri(magnetOrHash);
                     try {
                         Log.i(TAG, "Adding magnet stream with high-speed trackers: " + magnetUri);
-                        mSession.download(magnetUri, mCacheDir, TorrentFlags.AUTO_MANAGED.or_(TorrentFlags.SEQUENTIAL_DOWNLOAD));
+                        mSession.download(magnetUri, mCacheDir, TorrentFlags.AUTO_MANAGED);
                         TorrentHandle h = getHandle(2000);
                         if (h != null && h.isValid()) {
                             enrichTrackers(h, magnetUri);
@@ -604,9 +604,8 @@ public class TorrentEngine {
         mStartPiece = Math.max(0, Math.min(maxValidPiece, (int) (fileOffset / mPieceLength)));
         mEndPiece = Math.max(0, Math.min(maxValidPiece, (int) ((fileOffset + maxBytes - 1) / mPieceLength)));
 
-        // Enable sequential download mode in libtorrent
+        // Resume torrent download mode in libtorrent
         try {
-            h.setSequentialRange(mStartPiece, mEndPiece);
             h.resume();
         } catch (Throwable ignored) {}
 
@@ -659,21 +658,17 @@ public class TorrentEngine {
                 h.setPieceDeadline(targetPiece, 0);
             } catch (Throwable ignored) {}
 
-            // Bound sequential range to avoid triggering speculative downloads 500 pieces ahead
-            try {
-                h.setSequentialRange(targetPiece, Math.min(mEndPiece, targetPiece + 35));
-            } catch (Throwable ignored) {}
-
             // Critical rule: pieces in the container header (start) and container trailer (end)
             // MUST NEVER be set to Priority.IGNORE! ExoPlayer needs both for MP4/MKV container parsing.
             int protectedHeaderEnd = Math.min(mEndPiece, mStartPiece + 3);
             int protectedTrailerStart = Math.max(mStartPiece, mEndPiece - 2);
 
-            // Deprioritize past pieces behind playhead ONLY if playhead is past the protected header
-            // and NOT probing the trailer
+            // Deprioritize bounded past pieces behind playhead ONLY if playhead is past the protected header
+            // and NOT probing the trailer (bounded window to avoid thousands of JNI calls)
             if (targetPiece > protectedHeaderEnd + 4 && targetPiece < protectedTrailerStart) {
-                int pastCutoff = targetPiece - 4;
-                for (int p = protectedHeaderEnd + 1; p < pastCutoff; p++) {
+                int pastStart = Math.max(protectedHeaderEnd + 1, targetPiece - 16);
+                int pastCutoff = targetPiece - 3;
+                for (int p = pastStart; p < pastCutoff; p++) {
                     try {
                         if (!h.havePiece(p)) {
                             h.piecePriority(p, Priority.IGNORE);
@@ -728,20 +723,6 @@ public class TorrentEngine {
                         h.piecePriority(p, Priority.FIVE);
                     }
                 } catch (Throwable ignored) {}
-            }
-
-            // Tier 4: Distant future pieces beyond lookahead window - strictly Priority.IGNORE
-            // (Excluding the protected trailer)
-            int distStart = targetPiece + 29;
-            int distEnd = Math.min(protectedTrailerStart - 1, mEndPiece);
-            if (distStart <= distEnd) {
-                for (int p = distStart; p <= distEnd; p++) {
-                    try {
-                        if (!h.havePiece(p)) {
-                            h.piecePriority(p, Priority.IGNORE);
-                        }
-                    } catch (Throwable ignored) {}
-                }
             }
         }
     }
@@ -858,14 +839,16 @@ public class TorrentEngine {
     /**
      * Purge all files in the cache directory safely if no stream is currently active.
      */
-    public synchronized void purgeCache() {
-        synchronized (mLock) {
-            if (mActiveHash != null) {
-                Log.i(TAG, "purgeCache ignored: Active stream is currently running for " + mActiveHash);
-                return;
+    public void purgeCache() {
+        synchronized (mPrepareLock) {
+            synchronized (mLock) {
+                if (mActiveHash != null) {
+                    Log.i(TAG, "purgeCache ignored: Active stream is currently running for " + mActiveHash);
+                    return;
+                }
             }
+            purgeCacheInternal();
         }
-        purgeCacheInternal();
     }
 
     private void purgeCacheInternal() {
@@ -978,7 +961,7 @@ public class TorrentEngine {
         }
     }
 
-    public void onDestroy() {
+    public synchronized void onDestroy() {
         try {
             mHarvesterExecutor.shutdownNow();
         } catch (Throwable ignored) {}
@@ -988,8 +971,10 @@ public class TorrentEngine {
                 mSession.stop();
             } catch (Exception ignored) {
             }
+            mSession = null;
         }
         purgeCache();
+        sInstance = null;
     }
 
     public String buildMagnetUri(String input) {

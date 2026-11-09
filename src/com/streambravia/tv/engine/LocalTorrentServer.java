@@ -122,6 +122,35 @@ public class LocalTorrentServer extends NanoHTTPD {
     private String mUpdateStatus = "idle";
     private String mUpdateError = null;
 
+    private static volatile LocalTorrentServer sInstance;
+
+    public static synchronized LocalTorrentServer getInstance(Context context) {
+        if (sInstance == null) {
+            sInstance = new LocalTorrentServer(context.getApplicationContext());
+            try {
+                sInstance.start();
+                Log.i(TAG, "LocalTorrentServer started on port " + PORT);
+            } catch (IOException e) {
+                Log.e(TAG, "Failed to start LocalTorrentServer: " + e.getMessage(), e);
+            }
+        } else if (!sInstance.isAlive()) {
+            try {
+                sInstance.start();
+                Log.i(TAG, "LocalTorrentServer restarted on port " + PORT);
+            } catch (IOException e) {
+                Log.e(TAG, "Failed to restart LocalTorrentServer: " + e.getMessage(), e);
+            }
+        }
+        return sInstance;
+    }
+
+    public synchronized void stopServer() {
+        try {
+            super.stop();
+        } catch (Exception ignored) {}
+        sInstance = null;
+    }
+
     public LocalTorrentServer(Context context) {
         super(null, PORT);
         mContext = context;
@@ -1021,15 +1050,19 @@ public class LocalTorrentServer extends NanoHTTPD {
                 final String magnetUri = buildFullMagnetUri(streamItem);
                 mMagnetRegistry.put(infoHash, magnetUri);
 
-                // Start resolving torrent metadata asynchronously so /api/resolve returns in <1ms!
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            mEngine.prepareStream(magnetUri, 30);
-                        } catch (Throwable ignored) {}
-                    }
-                }, "ResolveAsyncPrep").start();
+                // Check if metadata is cached on disk or quick DHT swarm response (up to 4 seconds)
+                boolean ready = mEngine.prepareStream(magnetUri, 4);
+                if (!ready) {
+                    // Continue preparing in background for cold swarms
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                mEngine.prepareStream(magnetUri, 45);
+                            } catch (Throwable ignored) {}
+                        }
+                    }, "ResolveAsyncPrep").start();
+                }
             }
 
             String localStreamUrl = "http://127.0.0.1:" + PORT + "/api/stream/video.mkv?info_hash=" + infoHash;
@@ -1863,7 +1896,7 @@ public class LocalTorrentServer extends NanoHTTPD {
 
                     long waitStart = System.currentTimeMillis();
                     boolean downloaded = false;
-                    while (System.currentTimeMillis() - waitStart < 40000) {
+                    while (System.currentTimeMillis() - waitStart < 60000) {
                         if (mClosed) {
                             throw new IOException("Stream closed");
                         }
@@ -1877,7 +1910,7 @@ public class LocalTorrentServer extends NanoHTTPD {
                         if (downloaded) break;
                         // Periodically reinforce urgent piece priorities every 2.5s
                         if ((System.currentTimeMillis() - waitStart) % 2500 < 350) {
-                            mEngine.prioritizeSlidingWindow(pieceIndex, 30);
+                            mEngine.prioritizeSlidingWindow(pieceIndex, 28);
                         }
                     }
                     if (!downloaded) {
