@@ -30,6 +30,8 @@ public class DeviceCapabilities {
 
     private int mMaxDecodeWidth = 1920;
     private int mMaxDecodeHeight = 1080;
+    private int mDisplayWidth = 1920;
+    private int mDisplayHeight = 1080;
     private boolean mSupports4K = false;
     private boolean mSupports8K = false;
     private String mMaxResolutionLabel = "1080p";
@@ -91,7 +93,9 @@ public class DeviceCapabilities {
                 }
             }
 
-            // Also inspect physical display modes if available
+            // Also inspect physical display modes separately
+            int dispW = 1920;
+            int dispH = 1080;
             try {
                 WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
                 if (wm != null) {
@@ -99,17 +103,19 @@ public class DeviceCapabilities {
                     Display.Mode[] modes = display.getSupportedModes();
                     if (modes != null) {
                         for (Display.Mode m : modes) {
-                            if (m.getPhysicalWidth() > maxW) maxW = m.getPhysicalWidth();
-                            if (m.getPhysicalHeight() > maxH) maxH = m.getPhysicalHeight();
+                            if (m.getPhysicalWidth() > dispW) dispW = m.getPhysicalWidth();
+                            if (m.getPhysicalHeight() > dispH) dispH = m.getPhysicalHeight();
                         }
                     }
                 }
             } catch (Throwable ignored) {}
 
+            mDisplayWidth = dispW;
+            mDisplayHeight = dispH;
             mMaxDecodeWidth = maxW;
             mMaxDecodeHeight = maxH;
 
-            // Determine capability tier
+            // Determine capability tier based strictly on actual hardware decoders
             if (maxW >= 7680 || maxH >= 4320) {
                 mSupports8K = true;
                 mSupports4K = true;
@@ -172,6 +178,8 @@ public class DeviceCapabilities {
             json.put("max_resolution", mMaxResolutionLabel);
             json.put("max_width", mMaxDecodeWidth);
             json.put("max_height", mMaxDecodeHeight);
+            json.put("display_width", mDisplayWidth);
+            json.put("display_height", mDisplayHeight);
             json.put("supports_4k", mSupports4K);
             json.put("supports_8k", mSupports8K);
             json.put("model", Build.MODEL);

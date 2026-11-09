@@ -1435,10 +1435,23 @@ public class LocalTorrentServer extends NanoHTTPD {
 
         // MIME Type Detection
         String mimeType = resolveMimeType(targetFile.getName());
+        Response.Status status = isRangeRequest ? Response.Status.PARTIAL_CONTENT : Response.Status.OK;
+
+        // Efficient HEAD response: return full headers without constructing disk stream
+        if (Method.HEAD.equals(session.getMethod())) {
+            Response response = newFixedLengthResponse(status, mimeType, "");
+            if (isRangeRequest) {
+                response.addHeader("Content-Range", "bytes " + startByte + "-" + endByte + "/" + totalLength);
+            }
+            response.addHeader("Accept-Ranges", "bytes");
+            response.addHeader("Content-Length", String.valueOf(contentLength));
+            response.addHeader("Connection", "keep-alive");
+            response.addHeader("Access-Control-Allow-Origin", "*");
+            return response;
+        }
 
         try {
             InputStream stream = new TorrentRangeInputStream(targetFile, mEngine, startByte, contentLength);
-            Response.Status status = isRangeRequest ? Response.Status.PARTIAL_CONTENT : Response.Status.OK;
             Response response = newFixedLengthResponse(status, mimeType, stream, contentLength);
             if (isRangeRequest) {
                 response.addHeader("Content-Range", "bytes " + startByte + "-" + endByte + "/" + totalLength);
@@ -1778,6 +1791,7 @@ public class LocalTorrentServer extends NanoHTTPD {
     private static class TorrentRangeInputStream extends InputStream {
         private final File mFile;
         private final TorrentEngine mEngine;
+        private final long mExpectedGeneration;
         private final long mStartOffset;
         private final long mTotalLength;
         private long mCurrentOffset;
@@ -1790,6 +1804,7 @@ public class LocalTorrentServer extends NanoHTTPD {
         public TorrentRangeInputStream(File file, TorrentEngine engine, long startOffset, long totalLength) throws IOException {
             mFile = file;
             mEngine = engine;
+            mExpectedGeneration = engine.getGeneration();
             mStartOffset = startOffset;
             mTotalLength = totalLength;
             mCurrentOffset = startOffset;
@@ -1822,6 +1837,9 @@ public class LocalTorrentServer extends NanoHTTPD {
                 if (mClosed) {
                     throw new IOException("Stream closed");
                 }
+                if (mEngine.getGeneration() != mExpectedGeneration) {
+                    throw new IOException("Stream generation changed");
+                }
                 if (mCurrentOffset >= mStartOffset + mTotalLength) {
                     return -1;
                 }
@@ -1852,6 +1870,9 @@ public class LocalTorrentServer extends NanoHTTPD {
                         if (mEngine.getActiveHash() == null) {
                             throw new IOException("Stream stopped");
                         }
+                        if (mEngine.getGeneration() != mExpectedGeneration) {
+                            throw new IOException("Stream generation changed");
+                        }
                         downloaded = mEngine.waitForPiece(pieceIndex, 350);
                         if (downloaded) break;
                         // Periodically reinforce urgent piece priorities every 2.5s
@@ -1860,7 +1881,7 @@ public class LocalTorrentServer extends NanoHTTPD {
                         }
                     }
                     if (!downloaded) {
-                        throw new IOException("Swarm buffering timeout at byte " + mCurrentOffset + " (piece " + pieceIndex + ")");
+                        throw new java.net.SocketTimeoutException("Swarm buffering timeout at byte " + mCurrentOffset + " (piece " + pieceIndex + ")");
                     }
                 }
 

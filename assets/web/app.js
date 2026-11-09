@@ -158,8 +158,25 @@ const settingsRepoName = document.getElementById('settings-repo-name');
 let currentActiveUpdate = null;
 let updatePollingTimer = null;
 
-// HLS.js MSE Player Engine instance
+// HLS.js MSE Player Engine instance & lazy loader
 let hlsInstance = null;
+let hlsLoadPromise = null;
+
+function ensureHlsLoaded() {
+  if (window.Hls) return Promise.resolve(window.Hls);
+  if (hlsLoadPromise) return hlsLoadPromise;
+  hlsLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'hls.min.js';
+    s.onload = () => resolve(window.Hls);
+    s.onerror = () => {
+      hlsLoadPromise = null;
+      reject(new Error('Failed to load Hls.js'));
+    };
+    document.head.appendChild(s);
+  });
+  return hlsLoadPromise;
+}
 
 function loadMediaStream(streamUrl, startPosSec = 0) {
   if (hlsInstance) {
@@ -170,54 +187,67 @@ function loadMediaStream(streamUrl, startPosSec = 0) {
   }
 
   const isHls = streamUrl.includes('.m3u8');
-  if (isHls && window.Hls && Hls.isSupported()) {
-    logClient('INFO', `Initializing Hls.js MSE Engine for: ${streamUrl}`);
-    hlsInstance = new Hls({
-      enableWorker: true,
-      lowLatencyMode: false,
-      backBufferLength: 60,
-      maxBufferLength: 20,
-      maxMaxBufferLength: 40,
-      maxBufferSize: 30 * 1000 * 1000,
-      startPosition: startPosSec > 0 ? startPosSec : 0,
-      startFragPrefetch: true,
-      progressive: true,
-      maxBufferHole: 0.3,
-      manifestLoadingMaxRetry: 15,
-      manifestLoadingRetryDelay: 400,
-      levelLoadingMaxRetry: 8,
-      fragLoadingMaxRetry: 8
-    });
+  if (isHls) {
+    ensureHlsLoaded().then(HlsClass => {
+      if (HlsClass && HlsClass.isSupported()) {
+        logClient('INFO', `Initializing Hls.js MSE Engine for: ${streamUrl}`);
+        hlsInstance = new HlsClass({
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 60,
+          maxBufferLength: 20,
+          maxMaxBufferLength: 40,
+          maxBufferSize: 30 * 1000 * 1000,
+          startPosition: startPosSec > 0 ? startPosSec : 0,
+          startFragPrefetch: true,
+          progressive: true,
+          maxBufferHole: 0.3,
+          manifestLoadingMaxRetry: 15,
+          manifestLoadingRetryDelay: 400,
+          levelLoadingMaxRetry: 8,
+          fragLoadingMaxRetry: 8
+        });
 
-    hlsInstance.loadSource(streamUrl);
-    hlsInstance.attachMedia(videoPlayer);
+        hlsInstance.loadSource(streamUrl);
+        hlsInstance.attachMedia(videoPlayer);
 
-    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-      logClient('INFO', 'Hls.js manifest parsed successfully');
-      if (startPosSec > 0) {
-        videoPlayer.currentTime = startPosSec;
+        hlsInstance.on(HlsClass.Events.MANIFEST_PARSED, () => {
+          logClient('INFO', 'Hls.js manifest parsed successfully');
+          if (startPosSec > 0) {
+            videoPlayer.currentTime = startPosSec;
+          }
+          videoPlayer.play().catch(e => {
+            logClient('WARN', `Autoplay prevented by browser: ${e.message}`);
+          });
+        });
+
+        hlsInstance.on(HlsClass.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            logClient('WARN', `Hls.js error: ${data.type} - ${data.details}`);
+            switch (data.type) {
+              case HlsClass.ErrorTypes.NETWORK_ERROR:
+                hlsInstance.startLoad();
+                break;
+              case HlsClass.ErrorTypes.MEDIA_ERROR:
+                hlsInstance.recoverMediaError();
+                break;
+              default:
+                hlsInstance.destroy();
+                hlsInstance = null;
+                break;
+            }
+          }
+        });
+      } else {
+        videoPlayer.src = streamUrl;
+        if (startPosSec > 0) videoPlayer.currentTime = startPosSec;
+        videoPlayer.play().catch(() => {});
       }
-      videoPlayer.play().catch(e => {
-        logClient('WARN', `Autoplay prevented by browser: ${e.message}`);
-      });
-    });
-
-    hlsInstance.on(Hls.Events.ERROR, (event, data) => {
-      if (data.fatal) {
-        logClient('WARN', `Hls.js error: ${data.type} - ${data.details}`);
-        switch (data.type) {
-          case Hls.ErrorTypes.NETWORK_ERROR:
-            hlsInstance.startLoad();
-            break;
-          case Hls.ErrorTypes.MEDIA_ERROR:
-            hlsInstance.recoverMediaError();
-            break;
-          default:
-            hlsInstance.destroy();
-            hlsInstance = null;
-            break;
-        }
-      }
+    }).catch(err => {
+      logClient('WARN', 'Hls.js lazy load fallback: ' + err.message);
+      videoPlayer.src = streamUrl;
+      if (startPosSec > 0) videoPlayer.currentTime = startPosSec;
+      videoPlayer.play().catch(() => {});
     });
   } else {
     // Native HTML5 playback

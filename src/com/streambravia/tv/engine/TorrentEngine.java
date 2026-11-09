@@ -104,6 +104,8 @@ public class TorrentEngine {
     private int mLastWindowPiece = -1;
     private final ScheduledExecutorService mHarvesterExecutor = Executors.newSingleThreadScheduledExecutor();
     private final CountDownLatch mSessionInitLatch = new CountDownLatch(1);
+    private final java.util.concurrent.atomic.AtomicLong mGeneration = new java.util.concurrent.atomic.AtomicLong(0L);
+    private final java.util.Set<String> mAddedTrackerUrls = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public static synchronized TorrentEngine getInstance(Context context) {
         if (sInstance == null) {
@@ -333,10 +335,6 @@ public class TorrentEngine {
                         mActiveTorrentInfo = ti;
                         saveMetadataCache(mActiveHash, ti);
                         configureStreamingPriorities(h, ti);
-                        try {
-                            h.forceReannounce(0, -1, TorrentHandle.IGNORE_MIN_INTERVAL);
-                            h.forceDHTAnnounce();
-                        } catch (Throwable ignored) {}
                         mIsMetadataReady.set(true);
                         if (mMetadataLatch != null) {
                             mMetadataLatch.countDown();
@@ -377,18 +375,24 @@ public class TorrentEngine {
         if (h == null || !h.isValid()) return;
         List<String> dynamicTrackers = extractTrackers(magnetOrHash);
         for (String tr : dynamicTrackers) {
-            try {
-                h.addTracker(new org.libtorrent4j.AnnounceEntry(tr));
-            } catch (Throwable ignored) {}
+            String norm = (tr != null) ? tr.trim() : "";
+            if (!norm.isEmpty() && mAddedTrackerUrls.add(norm)) {
+                try {
+                    h.addTracker(new org.libtorrent4j.AnnounceEntry(norm));
+                } catch (Throwable ignored) {}
+            }
         }
         for (String tr : PUBLIC_TRACKERS) {
-            try {
-                h.addTracker(new org.libtorrent4j.AnnounceEntry(tr));
-            } catch (Throwable ignored) {}
+            String norm = (tr != null) ? tr.trim() : "";
+            if (!norm.isEmpty() && mAddedTrackerUrls.add(norm)) {
+                try {
+                    h.addTracker(new org.libtorrent4j.AnnounceEntry(norm));
+                } catch (Throwable ignored) {}
+            }
         }
         try {
-            h.forceReannounce(0, -1, TorrentHandle.IGNORE_MIN_INTERVAL);
             h.forceDHTAnnounce();
+            h.forceReannounce();
         } catch (Throwable ignored) {}
     }
 
@@ -604,8 +608,6 @@ public class TorrentEngine {
         try {
             h.setSequentialRange(mStartPiece, mEndPiece);
             h.resume();
-            h.forceReannounce(0, -1, TorrentHandle.IGNORE_MIN_INTERVAL);
-            h.forceDHTAnnounce();
         } catch (Throwable ignored) {}
 
         // Boost the first 4 pieces with TOP priority and urgent deadline for immediate playback start
@@ -766,9 +768,10 @@ public class TorrentEngine {
         synchronized (mLock) {
             TorrentHandle h = getHandle();
             if (h == null || mActiveTorrentInfo == null) return false;
-            int p = clampPiece(pieceIndex);
+            int numPieces = mActiveTorrentInfo.numPieces();
+            if (pieceIndex < 0 || pieceIndex >= numPieces) return false;
             try {
-                return h.havePiece(p);
+                return h.havePiece(pieceIndex);
             } catch (Throwable e) {
                 return false;
             }
@@ -776,15 +779,14 @@ public class TorrentEngine {
     }
 
     public boolean waitForPiece(int pieceIndex, long timeoutMs) {
-        int p = clampPiece(pieceIndex);
+        if (pieceIndex < mStartPiece || pieceIndex > mEndPiece) return false;
         synchronized (mLock) {
             TorrentHandle h = getHandle();
             if (h == null || mActiveTorrentInfo == null) return false;
-            if (p < mStartPiece || p > mEndPiece) return false;
             try {
-                if (h.havePiece(p)) return true;
-                h.piecePriority(p, Priority.TOP_PRIORITY);
-                h.setPieceDeadline(p, 0); // Immediate deadline for blocking playback reads
+                if (h.havePiece(pieceIndex)) return true;
+                h.piecePriority(pieceIndex, Priority.TOP_PRIORITY);
+                h.setPieceDeadline(pieceIndex, 0); // Immediate deadline for blocking playback reads
             } catch (Throwable ignored) {}
         }
 
@@ -792,7 +794,7 @@ public class TorrentEngine {
         synchronized (mPieceWaitLock) {
             long deadline = System.currentTimeMillis() + timeoutMs;
             while (System.currentTimeMillis() < deadline) {
-                if (isPieceDownloaded(p)) return true;
+                if (isPieceDownloaded(pieceIndex)) return true;
                 if (mActiveHash == null) return false;
                 long remaining = deadline - System.currentTimeMillis();
                 if (remaining <= 0) break;
@@ -803,7 +805,11 @@ public class TorrentEngine {
                 }
             }
         }
-        return isPieceDownloaded(p);
+        return isPieceDownloaded(pieceIndex);
+    }
+
+    public long getGeneration() {
+        return mGeneration.get();
     }
 
     public void stopCurrentStream() {
@@ -813,6 +819,12 @@ public class TorrentEngine {
     }
 
     private void stopCurrentStreamInternal() {
+        mGeneration.incrementAndGet();
+        mAddedTrackerUrls.clear();
+        synchronized (mPieceWaitLock) {
+            mPieceWaitLock.notifyAll();
+        }
+
         final String hashToRemove;
         synchronized (mLock) {
             hashToRemove = mActiveHash;
