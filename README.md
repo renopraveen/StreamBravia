@@ -22,6 +22,15 @@ Designed from the ground up specifically for **Android TV** and **Google TV** (A
   Directly checks [GitHub Releases](https://github.com/renopraveen/StreamBravia/releases/latest) from within the app, displaying update notices, release changelogs, real-time download progress, and package installation.
 - **🎮 100% Android TV D-Pad Optimized**:
   Full spatial D-pad navigation, automatic card focus, sticky navigation drawer, and TV-first UI layout.
+- **⚡ v1.1.8 Performance Engine**:
+  Hot-path tracker flood elimination, RFC 7233 range compliance with suffix support, stream generation isolation, HLS.js lazy-loading, asynchronous libtorrent initialization, and hardware decoder separation.
+
+---
+
+## 📥 Downloads & Releases
+
+Get the latest pre-compiled signed APK directly from GitHub Releases:
+- **[Download Latest APK (v1.1.8)](https://github.com/renopraveen/StreamBravia/releases/latest)**
 
 ---
 
