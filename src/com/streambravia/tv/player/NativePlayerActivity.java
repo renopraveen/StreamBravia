@@ -43,6 +43,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
+import androidx.media3.exoplayer.upstream.DefaultAllocator;
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.CaptionStyleCompat;
@@ -301,18 +302,20 @@ public class NativePlayerActivity extends Activity implements SurfaceHolder.Call
     }
 
     private void initPlayer() {
-        // Optimized playback buffer tuned for low-memory (1GB) Android TVs:
-        // 12s minimum cushion, 35s max reservoir, 1.5s fast initial startup, 3.5s rebuffer threshold
+        // Low-memory Sony Bravia TV profile:
+        // 6s min cushion, 18s max reservoir, 500ms INSTANT playback start, 1.2s rapid rebuffer/seek recovery
+        DefaultAllocator allocator = new DefaultAllocator(true, 32 * 1024);
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
-                .setBufferDurationsMs(12000, 35000, 1500, 3500)
-                .setBackBuffer(8000, false)
+                .setAllocator(allocator)
+                .setBufferDurationsMs(6000, 18000, 500, 1200)
+                .setBackBuffer(2000, false)
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build();
 
         DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
                 .setEnableDecoderFallback(true)
-                .setAllowedVideoJoiningTimeMs(6000);
+                .setAllowedVideoJoiningTimeMs(4000);
 
         DeviceCapabilities caps = DeviceCapabilities.getInstance(this);
         String prefAudio = resolveLanguageCode(mOriginalLanguage);

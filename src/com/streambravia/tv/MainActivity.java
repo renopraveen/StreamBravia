@@ -608,7 +608,12 @@ public class MainActivity extends Activity {
                 @Override
                 public void run() {
                     if (mWebView != null) {
-                        mWebView.onPause();
+                        try {
+                            mWebView.onPause();
+                            mWebView.pauseTimers();
+                            mWebView.freeMemory();
+                            mWebView.clearCache(false);
+                        } catch (Throwable ignored) {}
                     }
                     Intent intent = new Intent(MainActivity.this, com.streambravia.tv.player.NativePlayerActivity.class);
                     intent.putExtra(com.streambravia.tv.player.NativePlayerActivity.EXTRA_STREAM_URL, streamUrl);
@@ -780,7 +785,10 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (mWebView != null) {
-            mWebView.onResume();
+            try {
+                mWebView.resumeTimers();
+                mWebView.onResume();
+            } catch (Throwable ignored) {}
         }
         hideSystemUI();
     }
@@ -789,7 +797,21 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         if (mWebView != null) {
-            mWebView.onPause();
+            try {
+                mWebView.onPause();
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (mWebView != null) {
+            try {
+                mWebView.onPause();
+                mWebView.pauseTimers();
+                mWebView.freeMemory();
+            } catch (Throwable ignored) {}
         }
     }
 
@@ -799,6 +821,7 @@ public class MainActivity extends Activity {
         if (mWebView != null) {
             try {
                 mWebView.freeMemory();
+                mWebView.clearCache(false);
             } catch (Throwable ignored) {}
         }
         if (level >= TRIM_MEMORY_MODERATE) {

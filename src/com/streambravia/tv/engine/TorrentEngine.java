@@ -182,11 +182,11 @@ public class TorrentEngine {
             SettingsPack sp = new SettingsPack();
             sp.downloadRateLimit(0); // Unlimited download
             sp.uploadRateLimit(0); // Unlimited upload so peers freely unchoke download bandwidth
-            sp.activeDownloads(4);
-            sp.activeLimit(10);
-            sp.connectionsLimit(150); // Connect to up to 150 peers/seeds simultaneously (optimal for TV Wi-Fi)
-            sp.maxPeerlistSize(3000); // Retain 3000 candidate peers in the swarm pool
-            sp.alertQueueSize(5000);
+            sp.activeDownloads(2);
+            sp.activeLimit(4);
+            sp.connectionsLimit(55); // Connect to up to 55 peers simultaneously (tuned for TV RAM & Wi-Fi)
+            sp.maxPeerlistSize(500); // Retain 500 candidate peers in the swarm pool (down from 3000)
+            sp.alertQueueSize(500);  // Cap alert queue to protect Dalvik heap from thousands of Java objects
             sp.inactivityTimeout(20);
             sp.anonymousMode(false); // MUST be false so DHT and peer handshakes connect freely
             sp.setEnableDht(true);
@@ -202,8 +202,8 @@ public class TorrentEngine {
 
             // Immediate Burst Connection: Load all peers at once without trickling
             sp.setBoolean(settings_pack.bool_types.smooth_connects.swigValue(), false);
-            sp.setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), 100);
-            sp.setInteger(settings_pack.int_types.connection_speed.swigValue(), 100);
+            sp.setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), 60);
+            sp.setInteger(settings_pack.int_types.connection_speed.swigValue(), 60);
             sp.setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 15); // Standard 15s to allow handshakes to complete
             sp.setInteger(settings_pack.int_types.handshake_timeout.swigValue(), 15); // Standard 15s
             sp.setInteger(settings_pack.int_types.allowed_fast_set_size.swigValue(), 10);
@@ -211,15 +211,15 @@ public class TorrentEngine {
             sp.setInteger(settings_pack.int_types.tracker_completion_timeout.swigValue(), 15);
             sp.setInteger(settings_pack.int_types.tracker_receive_timeout.swigValue(), 10);
             sp.setInteger(settings_pack.int_types.dht_search_branching.swigValue(), 8);
-            sp.setInteger(settings_pack.int_types.dht_max_peers_reply.swigValue(), 100);
+            sp.setInteger(settings_pack.int_types.dht_max_peers_reply.swigValue(), 80);
             sp.setInteger(settings_pack.int_types.initial_picker_threshold.swigValue(), 4);
 
             // Aggressive DHT scheduling
             sp.setBoolean(settings_pack.bool_types.dht_aggressive_lookups.swigValue(), true);
             sp.setBoolean(settings_pack.bool_types.auto_sequential.swigValue(), false);
 
-            // Deep pipelining tuned for TV: request queue 500 blocks for maximum throughput without memory exhaustion
-            sp.setInteger(settings_pack.int_types.max_out_request_queue.swigValue(), 500);
+            // Deep pipelining tuned for TV: request queue 250 blocks for maximum throughput without memory exhaustion
+            sp.setInteger(settings_pack.int_types.max_out_request_queue.swigValue(), 250);
             sp.setInteger(settings_pack.int_types.request_queue_time.swigValue(), 2);
 
             // Rapid piece timeout: if a peer stalls on a block, steal from faster peer after 10s
@@ -229,16 +229,16 @@ public class TorrentEngine {
             sp.setInteger(settings_pack.int_types.choking_algorithm.swigValue(), settings_pack.choking_algorithm_t.rate_based_choker.swigValue());
             sp.setInteger(settings_pack.int_types.seed_choking_algorithm.swigValue(), settings_pack.seed_choking_algorithm_t.fastest_upload.swigValue());
 
-            // 2 MB network socket buffers for smooth UDP/TCP throughput
-            sp.setInteger(settings_pack.int_types.recv_socket_buffer_size.swigValue(), 2 * 1024 * 1024);
-            sp.setInteger(settings_pack.int_types.send_socket_buffer_size.swigValue(), 512 * 1024);
+            // 256 KB network socket buffers for smooth UDP/TCP throughput without memory pressure
+            sp.setInteger(settings_pack.int_types.recv_socket_buffer_size.swigValue(), 256 * 1024);
+            sp.setInteger(settings_pack.int_types.send_socket_buffer_size.swigValue(), 128 * 1024);
 
             // Centrifuge Peer Churn & High-Bandwidth Retention Filter (Non-destructive to startup)
             sp.setBoolean(settings_pack.bool_types.auto_manage_prefer_seeds.swigValue(), true); // Prioritize 100% complete seeders
             sp.setBoolean(settings_pack.bool_types.close_redundant_connections.swigValue(), true); // Drop redundant connections
             sp.setInteger(settings_pack.int_types.peer_turnover.swigValue(), 10); // Disconnect bottom 10% slowest peers
             sp.setInteger(settings_pack.int_types.peer_turnover_cutoff.swigValue(), 90); // Filter bottom 90% percentile of peers
-            sp.setInteger(settings_pack.int_types.peer_turnover_interval.swigValue(), 20); // Run filter every 20 seconds
+            sp.setInteger(settings_pack.int_types.peer_turnover_interval.swigValue(), 15); // Run filter every 15 seconds
             sp.setInteger(settings_pack.int_types.inactive_down_rate.swigValue(), 2048); // Drop truly dead peers sending < 2 KB/s
             sp.setInteger(settings_pack.int_types.inactivity_timeout.swigValue(), 20); // Drop idle peers after 20s
             sp.setInteger(settings_pack.int_types.unchoke_interval.swigValue(), 1); // Recalculate unchoke slots every 1s
@@ -247,8 +247,8 @@ public class TorrentEngine {
             // Mixed mode: Prefer TCP / don't let uTP choke throughput
             sp.setInteger(settings_pack.int_types.mixed_mode_algorithm.swigValue(), settings_pack.bandwidth_mixed_algo_t.prefer_tcp.swigValue());
 
-            // 12 MB max disk write queue cap to protect low-RAM (1GB) Android TVs
-            sp.setInteger(settings_pack.int_types.max_queued_disk_bytes.swigValue(), 12 * 1024 * 1024);
+            // 4 MB max disk write queue cap to protect low-RAM Android TVs
+            sp.setInteger(settings_pack.int_types.max_queued_disk_bytes.swigValue(), 4 * 1024 * 1024);
 
             mSession.addListener(new AlertListener() {
                 @Override
@@ -348,6 +348,100 @@ public class TorrentEngine {
         }
     }
 
+    /**
+     * Fast HTTP metadata fetcher: downloads .torrent file from public web caches in ~200-400ms,
+     * completely bypassing cold DHT metadata negotiation for popular torrents.
+     */
+    public boolean fetchTorrentMetadataFromWeb(String hash, File destFile) {
+        if (hash == null || hash.length() != 40) return false;
+        String upperHash = hash.toUpperCase();
+        String lowerHash = hash.toLowerCase();
+        String[] endpoints = new String[]{
+                "https://btcache.me/torrent/" + upperHash + ".torrent",
+                "https://itorrents.org/torrent/" + upperHash + ".torrent",
+                "https://torrage.info/torrent.php?h=" + lowerHash
+        };
+
+        for (String urlStr : endpoints) {
+            java.net.HttpURLConnection conn = null;
+            try {
+                java.net.URL u = new java.net.URL(urlStr);
+                conn = (java.net.HttpURLConnection) u.openConnection();
+                conn.setConnectTimeout(2500);
+                conn.setReadTimeout(3000);
+                conn.setRequestProperty("User-Agent", "StreamBravia-TV/1.1.8");
+                conn.setRequestProperty("Accept-Encoding", "gzip, deflate");
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    java.io.InputStream in = conn.getInputStream();
+                    String encoding = conn.getContentEncoding();
+                    if ("gzip".equalsIgnoreCase(encoding)) {
+                        in = new java.util.zip.GZIPInputStream(in);
+                    }
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        baos.write(buf, 0, n);
+                        if (baos.size() > 5 * 1024 * 1024) break; // Torrents are usually < 500KB
+                    }
+                    in.close();
+                    byte[] data = baos.toByteArray();
+                    if (data.length > 80) {
+                        // Decompress gzip if server sent compressed without encoding header
+                        if ((data[0] & 0xFF) == 0x1F && (data[1] & 0xFF) == 0x8B) {
+                            try {
+                                java.util.zip.GZIPInputStream gzin = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(data));
+                                java.io.ByteArrayOutputStream decomp = new java.io.ByteArrayOutputStream();
+                                while ((n = gzin.read(buf)) != -1) decomp.write(buf, 0, n);
+                                gzin.close();
+                                data = decomp.toByteArray();
+                            } catch (Throwable ignored) {}
+                        }
+                        if (data.length > 50 && data[0] == 'd') {
+                            File tempFile = new File(mMetadataDir, "temp_" + lowerHash + ".torrent");
+                            java.io.FileOutputStream fos = new java.io.FileOutputStream(tempFile);
+                            fos.write(data);
+                            fos.close();
+                            try {
+                                TorrentInfo tiTest = new TorrentInfo(tempFile);
+                                if (tiTest.numPieces() > 0) {
+                                    if (tempFile.renameTo(destFile) || copyFile(tempFile, destFile)) {
+                                        tempFile.delete();
+                                        Log.i(TAG, "⚡ Fast HTTP metadata fetch succeeded from: " + urlStr + " (" + data.length + " bytes, " + tiTest.name() + ")");
+                                        return true;
+                                    }
+                                }
+                            } catch (Throwable t) {
+                                tempFile.delete();
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Throwable ignored) {}
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean copyFile(File src, File dst) {
+        try (java.io.FileInputStream in = new java.io.FileInputStream(src);
+             java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     public List<String> extractTrackers(String magnetUri) {
         List<String> list = new ArrayList<>();
         if (magnetUri == null || !magnetUri.contains("&tr=")) return list;
@@ -439,16 +533,28 @@ public class TorrentEngine {
                     latchToAwait = mMetadataLatch;
                 }
 
-                // 1. Instant Cache Check: If metadata is already cached on disk, load in 0.00s!
+                // Storage safety check: ensure TV flash has at least 250MB free
+                try {
+                    long freeSpace = mCacheDir.getUsableSpace();
+                    if (freeSpace < 250L * 1024L * 1024L) {
+                        Log.w(TAG, "Low TV storage detected (" + (freeSpace / (1024 * 1024)) + " MB free). Purging old cache...");
+                        purgeCacheInternal();
+                    }
+                } catch (Throwable ignored) {}
+
+                // 1. Instant Cache Check & Fast Web Metadata Fetch:
                 boolean loadedFromCache = false;
                 File cachedMeta = new File(mMetadataDir, hash + ".torrent");
+                if (!cachedMeta.exists() || cachedMeta.length() == 0) {
+                    fetchTorrentMetadataFromWeb(hash, cachedMeta);
+                }
                 if (cachedMeta.exists() && cachedMeta.length() > 0) {
                     try {
                         TorrentInfo ti = new TorrentInfo(cachedMeta);
                         synchronized (mLock) {
                             mActiveTorrentInfo = ti;
                         }
-                        Log.i(TAG, "⚡ Instant Cache Hit: Loaded metadata for " + hash + " (" + ti.name() + ")");
+                        Log.i(TAG, "⚡ Instant Cache/Web Hit: Loaded metadata for " + hash + " (" + ti.name() + ")");
                         mSession.download(ti, mCacheDir, null, null, null, TorrentFlags.AUTO_MANAGED);
                         TorrentHandle h = getHandle(2500);
                         if (h != null && h.isValid()) {
@@ -461,10 +567,11 @@ public class TorrentEngine {
                             return true;
                         } else {
                             loadedFromCache = true;
-                            Log.i(TAG, "Metadata loaded from disk; awaiting handle registration in session...");
+                            Log.i(TAG, "Metadata loaded; awaiting handle registration in session...");
                         }
                     } catch (Throwable t) {
                         Log.w(TAG, "Cached metadata error, falling back to network swarm: " + t.getMessage());
+                        try { cachedMeta.delete(); } catch (Throwable ignored) {}
                     }
                 }
 
@@ -582,13 +689,20 @@ public class TorrentEngine {
                 parent.mkdirs();
             }
             if (!mTargetFile.exists()) {
-                RandomAccessFile raf = new RandomAccessFile(mTargetFile, "rw");
-                raf.setLength(mTargetFileSize);
-                raf.close();
-                Log.i(TAG, "Pre-allocated sparse target file: " + mTargetFile.getAbsolutePath() + " (" + (mTargetFileSize / (1024 * 1024)) + " MB)");
+                try {
+                    RandomAccessFile raf = new RandomAccessFile(mTargetFile, "rw");
+                    raf.setLength(mTargetFileSize);
+                    raf.close();
+                    Log.i(TAG, "Pre-allocated sparse target file: " + mTargetFile.getAbsolutePath() + " (" + (mTargetFileSize / (1024 * 1024)) + " MB)");
+                } catch (Throwable t) {
+                    Log.w(TAG, "Sparse preallocation notice: " + t.getMessage());
+                    if (!mTargetFile.exists()) {
+                        mTargetFile.createNewFile();
+                    }
+                }
             }
         } catch (Throwable t) {
-            Log.w(TAG, "Sparse file creation notice: " + t.getMessage());
+            Log.w(TAG, "File creation notice: " + t.getMessage());
         }
 
         // Prioritize ONLY the target video file, ignore samples, nfo, extra files
@@ -613,7 +727,7 @@ public class TorrentEngine {
         for (int p = mStartPiece; p <= Math.min(mEndPiece, mStartPiece + 3); p++) {
             try {
                 h.piecePriority(p, Priority.TOP_PRIORITY);
-                h.setPieceDeadline(p, (p - mStartPiece + 1) * 60);
+                h.setPieceDeadline(p, (p - mStartPiece) * 40); // Piece 0 receives deadline 0 (IMMEDIATE)
             } catch (Throwable ignored) {}
         }
 
@@ -621,7 +735,7 @@ public class TorrentEngine {
         for (int p = Math.max(mStartPiece, mEndPiece - 2); p <= mEndPiece; p++) {
             try {
                 h.piecePriority(p, Priority.TOP_PRIORITY);
-                h.setPieceDeadline(p, 80);
+                h.setPieceDeadline(p, 50);
             } catch (Throwable ignored) {}
         }
 
